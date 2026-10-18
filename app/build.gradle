@@ -37,7 +37,8 @@ android {
         compose true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.1'
+        // تم تعديل هذا السطر ليتوافق مع إصدار Kotlin 1.9.23
+        kotlinCompilerExtensionVersion '1.5.11'
     }
 }
 
