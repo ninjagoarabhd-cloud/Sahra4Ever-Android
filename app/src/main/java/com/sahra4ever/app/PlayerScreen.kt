@@ -43,7 +43,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    // السيرفر الأول هو الافتراضي
     var selectedServer by remember { mutableStateOf(servers[0].second) }
     var currentUrl by remember { mutableStateOf("") }
     
@@ -52,6 +51,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     var showCloseButton by remember { mutableStateOf(true) }
 
+    // إخفاء زر X بعد 3 ثواني
     LaunchedEffect(showCloseButton) {
         if (showCloseButton) {
             delay(3000)
@@ -61,19 +61,10 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
 
     LaunchedEffect(selectedServer) {
         isLoading = true
-        // بناء الرابط مع إضافة التشغيل التلقائي
         currentUrl = if (mediaType == "tv") {
-            if (selectedServer.contains("vsembed") || selectedServer.contains("vidsrc")) {
-                "${selectedServer}tv/$movieId/1/1?autoplay=1" // إضافة التشغيل التلقائي
-            } else {
-                "${selectedServer}tv/$movieId/1/1"
-            }
+            "${selectedServer}tv/$movieId/1/1"
         } else {
-            if (selectedServer.contains("vsembed") || selectedServer.contains("vidsrc")) {
-                "${selectedServer}movie/$movieId?autoplay=1" // إضافة التشغيل التلقائي
-            } else {
-                "${selectedServer}movie/$movieId"
-            }
+            "${selectedServer}movie/$movieId"
         }
     }
 
@@ -147,8 +138,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     settings.javaScriptEnabled = true
                                     settings.domStorageEnabled = true
                                     settings.mediaPlaybackRequiresUserGesture = false 
-                                    settings.javaScriptCanOpenWindowsAutomatically = false
-                                    settings.setSupportMultipleWindows(false)
+                                    settings.javaScriptCanOpenWindowsAutomatically = true
                                     isVerticalScrollBarEnabled = false
                                     isHorizontalScrollBarEnabled = false
 
@@ -162,42 +152,41 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
-                                            // سكربت قوي جداً لمسح الإعلانات
+                                            // كود JavaScript "جراحي" لمسح الإعلانات من VsEmbed
                                             val jsCode = """
                                                 javascript:(function() {
-                                                    // 1. إخفاء كل الصور الكبيرة التي قد تكون إعلانات
-                                                    var images = document.querySelectorAll('img');
-                                                    for (var i = 0; i < images.length; i++) {
-                                                        if (images[i].width > 100 || images[i].height > 100) {
-                                                            images[i].style.display = 'none';
-                                                        }
-                                                    }
-
-                                                    // 2. إخفاء الروابط والنوافذ
-                                                    var links = document.querySelectorAll('a');
-                                                    for (var i = 0; i < links.length; i++) {
-                                                        links[i].style.display = 'none';
-                                                    }
-
-                                                    // 3. البحث عن زر التشغيل والضغط عليه
-                                                    var playButtons = document.querySelectorAll('button, div, span');
-                                                    for(var i=0; i<playButtons.length; i++) {
-                                                        var el = playButtons[i];
-                                                        if (el.className && typeof el.className === 'string' && (el.className.includes('play') || el.className.includes('Play'))) {
-                                                            el.click();
+                                                    // 1. إخفاء الإعلانات التي تظهر كصور أو أزرار
+                                                    var ads = document.querySelectorAll('img, a, div');
+                                                    for (var i = 0; i < ads.length; i++) {
+                                                        var el = ads[i];
+                                                        var src = (el.src || "").toLowerCase();
+                                                        var href = (el.href || "").toLowerCase();
+                                                        
+                                                        if (src.includes('aliexpress') || href.includes('aliexpress') || 
+                                                            src.includes('ad') || href.includes('ad') ||
+                                                            (el.innerText && el.innerText.includes('متجر'))) {
+                                                            el.style.display = 'none';
                                                         }
                                                     }
                                                     
-                                                    // منع النوافذ المنبثقة
-                                                    window.open = function(){};
+                                                    // 2. الضغط على زر التشغيل تلقائياً
+                                                    var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
+                                                    for(var j=0; j<playButtons.length; j++) {
+                                                        if((playButtons[j].className && playButtons[j].className.includes('play')) || 
+                                                            (playButtons[j].innerText && playButtons[j].innerText.includes('Play'))) {
+                                                            playButtons[j].click();
+                                                        }
+                                                    }
                                                 })()
                                             """.trimIndent()
                                             view?.evaluateJavascript(jsCode, null)
                                         }
 
                                         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                            // إغلاق الإعلانات التي تحاول فتح تطبيقات خارجية
                                             if (url?.startsWith("intent://") == true || 
                                                 url?.startsWith("market://") == true || 
+                                                url?.startsWith("aliexpress://") == true ||
                                                 url?.startsWith("https://play.google.com") == true) {
                                                 return true 
                                             }
