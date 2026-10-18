@@ -23,7 +23,7 @@ import coil.compose.AsyncImage
 @Composable
 fun HomeScreen() {
     // هنا تضع مفتاح الـ API الخاص بك
-    val apiKey = 26097366152d7131fde0f53b80ee37de 
+    val apiKey = "26097366152d7131fde0f53b80ee37de"
     
     var movies by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
