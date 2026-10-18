@@ -27,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -42,12 +43,24 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    var selectedServer by remember { mutableStateOf(servers[1].second) } // جعلنا VsEmbed هو الافتراضي لأنك تريد التركيز عليه
+    // 1. جعلنا السيرفر الأول هو الافتراضي
+    var selectedServer by remember { mutableStateOf(servers[0].second) }
     var currentUrl by remember { mutableStateOf("") }
     
     var isLoading by remember { mutableStateOf(true) }
     var customView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    
+    // 2. متغير للتحكم في إخفاء زر X
+    var showCloseButton by remember { mutableStateOf(true) }
+
+    // إخفاء زر X بعد 3 ثواني من فتح الشاشة الكاملة
+    LaunchedEffect(showCloseButton) {
+        if (showCloseButton) {
+            delay(3000)
+            showCloseButton = false
+        }
+    }
 
     LaunchedEffect(selectedServer) {
         isLoading = true
@@ -58,15 +71,12 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         }
     }
 
-    // التعامل مع وضع الشاشة الكاملة (إخفاء شريط الحالة)
     DisposableEffect(customView) {
         val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
         if (customView != null) {
-            // تفعيل وضع Immersive (شاشة كاملة)
             windowInsetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
         } else {
-            // العودة للوضع العادي
             windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
@@ -80,15 +90,18 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                 factory = { customView!! },
                 modifier = Modifier.fillMaxSize()
             )
-            IconButton(
-                onClick = {
-                    customViewCallback?.onCustomViewHidden()
-                    customView = null
-                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                },
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
+            // 3. إخفاء زر X بعد 3 ثواني
+            if (showCloseButton) {
+                IconButton(
+                    onClick = {
+                        customViewCallback?.onCustomViewHidden()
+                        customView = null
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
+                }
             }
         }
     } else {
@@ -128,11 +141,12 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     )
                                     settings.javaScriptEnabled = true
                                     settings.domStorageEnabled = true
-                                    settings.mediaPlaybackRequiresUserGesture = false // تشغيل تلقائي
+                                    settings.mediaPlaybackRequiresUserGesture = false // محاولة التشغيل التلقائي
                                     settings.javaScriptCanOpenWindowsAutomatically = false
                                     settings.setSupportMultipleWindows(false)
-                                    
-                                    // كود JavaScript هجومي لإخفاء إعلانات VsEmbed
+                                    isVerticalScrollBarEnabled = false
+                                    isHorizontalScrollBarEnabled = false
+
                                     webViewClient = object : WebViewClient() {
                                         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                             super.onPageStarted(view, url, favicon)
@@ -143,22 +157,31 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
-                                            // سكربت متقدم لإخفاء الإعلانات
+                                            // 4. سكربت هجومي لمسح الإعلانات
                                             val jsCode = """
                                                 javascript:(function() {
-                                                    // إخفاء العناصر التي تحتوي على كلمات دالة على الإعلانات
+                                                    // محاولة الضغط على زر التشغيل تلقائياً
+                                                    var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
+                                                    for(var i=0; i<playButtons.length; i++) {
+                                                        if(playButtons[i].innerText.includes('Play') || playButtons[i].className.includes('play')) {
+                                                            playButtons[i].click();
+                                                        }
+                                                    }
+
+                                                    // إخفاء أي عنصر يحتوي على كلمات دالة على الإعلانات
                                                     var elements = document.querySelectorAll('*');
                                                     for (var i = 0; i < elements.length; i++) {
                                                         var el = elements[i];
-                                                        if (el.id && el.id.toLowerCase().includes('ad')) el.style.display = 'none';
-                                                        if (el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('ad')) el.style.display = 'none';
-                                                        
-                                                        // إخفاء الأزرار التي تفتح روابط خارجية (مثل علي إكسبريس)
-                                                        if (el.tagName === 'A' && el.href && (el.href.includes('aliexpress') || el.href.includes('play.google'))) {
+                                                        var text = (el.innerText || "").toLowerCase();
+                                                        var id = (el.id || "").toLowerCase();
+                                                        var cls = (typeof el.className === 'string' ? el.className : "").toLowerCase();
+
+                                                        if (text.includes('متجر') || text.includes('إعلان') || id.includes('ad') || cls.includes('ad') || text.includes('aliexpress')) {
                                                             el.style.display = 'none';
                                                         }
                                                     }
-                                                    // محاولة إغلاق أي نوافذ منبثقة
+                                                    
+                                                    // منع النوافذ المنبثقة
                                                     window.open = function(){};
                                                 })()
                                             """.trimIndent()
@@ -168,9 +191,8 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                                             if (url?.startsWith("intent://") == true || 
                                                 url?.startsWith("market://") == true || 
-                                                url?.startsWith("https://play.google.com") == true ||
-                                                url?.contains("aliexpress") == true) {
-                                                return true // منع فتح التطبيقات الخارجية
+                                                url?.startsWith("https://play.google.com") == true) {
+                                                return true 
                                             }
                                             return false
                                         }
@@ -181,6 +203,8 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onShowCustomView(view, callback)
                                             customView = view
                                             customViewCallback = callback
+                                            // إعادة إظهار زر X عند الدخول للشاشة الكاملة
+                                            showCloseButton = true 
                                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                                         }
 
