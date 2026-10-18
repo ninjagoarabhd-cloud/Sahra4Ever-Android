@@ -14,14 +14,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Close // استبدلنا Fullscreen بـ Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -43,7 +42,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
     var selectedServer by remember { mutableStateOf(servers[0].second) }
     var currentUrl by remember { mutableStateOf("") }
     
-    // متغيرات شاشة التحميل وملء الشاشة
     var isLoading by remember { mutableStateOf(true) }
     var customView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
@@ -72,7 +70,8 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                 },
                 modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
             ) {
-                Icon(Icons.Default.Fullscreen, contentDescription = "إغلاق", tint = Color.White)
+                // استخدام أيقونة Close
+                Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
             }
         }
     } else {
@@ -96,7 +95,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // شاشة العرض
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -117,8 +115,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     settings.mediaPlaybackRequiresUserGesture = false
                                     settings.javaScriptCanOpenWindowsAutomatically = false
                                     settings.setSupportMultipleWindows(false)
-                                    
-                                    // إخفاء شريط التمرير
                                     isVerticalScrollBarEnabled = false
                                     isHorizontalScrollBarEnabled = false
 
@@ -132,14 +128,10 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
-                                            // حقن كود JavaScript لإخفاء الإعلانات ومحاولة التشغيل التلقائي
                                             val jsCode = """
                                                 javascript:(function() {
-                                                    // إخفاء العناصر التي تحتوي على كلمات دالة على الإعلانات
                                                     var ads = document.querySelectorAll('div[id*="ad"], div[class*="ad"], iframe[src*="ad"]');
                                                     for(var i=0; i<ads.length; i++){ ads[i].style.display='none'; }
-                                                    
-                                                    // إزالة النوافذ المنبثقة
                                                     window.open = function(){};
                                                     document.onclick = function(e) { e.stopPropagation(); };
                                                 })()
@@ -162,7 +154,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onShowCustomView(view, callback)
                                             customView = view
                                             customViewCallback = callback
-                                            // إجبار الهاتف على الوضع الأفقي
                                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                                         }
 
@@ -170,7 +161,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onHideCustomView()
                                             customView = null
                                             customViewCallback = null
-                                            // إعادة الهاتف للوضع العمودي
                                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                         }
                                     }
@@ -183,7 +173,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                             modifier = Modifier.fillMaxSize()
                         )
                         
-                        // شاشة التحميل (مثل Hayya TV)
                         if (isLoading) {
                             Box(
                                 modifier = Modifier
@@ -204,7 +193,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // أزرار السيرفرات
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
