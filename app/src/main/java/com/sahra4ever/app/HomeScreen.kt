@@ -1,6 +1,7 @@
 package com.sahra4ever.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -21,14 +22,11 @@ import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen() {
-    // هنا تضع مفتاح الـ API الخاص بك
-    val apiKey = "26097366152d7131fde0f53b80ee37de"
-    
+fun HomeScreen(onMovieClick: (Int, String) -> Unit) { // أضفنا دالة للضغط
+    val apiKey = "26097366152d7131fde0f53b80ee37de" // تأكد من المفتاح هنا
     var movies by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    // جلب البيانات من الإنترنت عند فتح الشاشة
     LaunchedEffect(Unit) {
         try {
             val api = TMDBApi.create()
@@ -43,14 +41,7 @@ fun HomeScreen() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = "Sahra4Ever",
-                        color = Color(0xFFE50914),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 24.sp
-                    )
-                },
+                title = { Text("Sahra4Ever", color = Color(0xFFE50914), fontWeight = FontWeight.Bold, fontSize = 24.sp) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF121212))
             )
         },
@@ -68,7 +59,11 @@ fun HomeScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(movies) { movie ->
-                    MovieCard(movie)
+                    // تمرير حدث الضغط
+                    MovieCard(movie) {
+                        val type = if (movie.mediaType == "tv" || movie.name != null) "tv" else "movie"
+                        onMovieClick(movie.id, type)
+                    }
                 }
             }
         }
@@ -76,11 +71,11 @@ fun HomeScreen() {
 }
 
 @Composable
-fun MovieCard(movie: Movie) {
+fun MovieCard(movie: Movie, onClick: () -> Unit) {
     val imageUrl = if (movie.posterPath != null) "https://image.tmdb.org/t/p/w342${movie.posterPath}" else ""
     val title = movie.title ?: movie.name ?: "بدون عنوان"
 
-    Column {
+    Column(modifier = Modifier.clickable { onClick() }) { // أضفنا clickable
         AsyncImage(
             model = imageUrl,
             contentDescription = title,

@@ -4,13 +4,38 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                HomeScreen() // هذا السطر هو الذي يفتح شاشة الأفلام الجديدة
+                val navController = rememberNavController()
+                
+                NavHost(navController = navController, startDestination = "home") {
+                    // شاشة الرئيسية
+                    composable("home") {
+                        HomeScreen(
+                            onMovieClick = { id, type ->
+                                navController.navigate("details/$id/$type")
+                            }
+                        )
+                    }
+                    // شاشة التفاصيل
+                    composable("details/{movieId}/{mediaType}") { backStackEntry ->
+                        val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
+                        val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
+                        
+                        DetailsScreen(
+                            movieId = movieId,
+                            mediaType = mediaType,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                }
             }
         }
     }
