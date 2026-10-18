@@ -21,8 +21,12 @@ import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
-    val apiKey = "26097366152d7131fde0f53b80ee37de" // ضع المفتاح هنا
+// 1. هنا أضفنا onPlayClick
+fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayClick: (Int, String) -> Unit) {
+    
+    // (تنبيه: يفضل عدم مشاركة مفتاح الـ API علناً، لكن تركته هنا لكي يعمل التطبيق معك)
+    val apiKey = "26097366152d7131fde0f53b80ee37de" 
+    
     var movie by remember { mutableStateOf<Movie?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
@@ -111,9 +115,9 @@ fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // زر المشاهدة (سنفعله في الخطوة القادمة)
+                    // 2. هنا قمنا بتفعيل زر المشاهدة
                     Button(
-                        onClick = { /* TODO: فتح المشغل */ },
+                        onClick = { onPlayClick(movieId, mediaType) },
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                         shape = RoundedCornerShape(8.dp)

@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 
                 NavHost(navController = navController, startDestination = "home") {
-                    // شاشة الرئيسية
+                    // 1. شاشة الرئيسية
                     composable("home") {
                         HomeScreen(
                             onMovieClick = { id, type ->
@@ -24,12 +24,27 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
-                    // شاشة التفاصيل
+                    // 2. شاشة التفاصيل
                     composable("details/{movieId}/{mediaType}") { backStackEntry ->
                         val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
                         val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
                         
                         DetailsScreen(
+                            movieId = movieId,
+                            mediaType = mediaType,
+                            onBack = { navController.popBackStack() },
+                            // هذا السطر يربط زر المشاهدة بشاشة المشغل
+                            onPlayClick = { id, type ->
+                                navController.navigate("player/$id/$type")
+                            }
+                        )
+                    }
+                    // 3. شاشة المشاهدة (المشغل)
+                    composable("player/{movieId}/{mediaType}") { backStackEntry ->
+                        val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
+                        val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
+                        
+                        PlayerScreen(
                             movieId = movieId,
                             mediaType = mediaType,
                             onBack = { navController.popBackStack() }
