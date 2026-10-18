@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close // استبدلنا Fullscreen بـ Close
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +24,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -39,7 +42,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    var selectedServer by remember { mutableStateOf(servers[0].second) }
+    var selectedServer by remember { mutableStateOf(servers[1].second) } // جعلنا VsEmbed هو الافتراضي لأنك تريد التركيز عليه
     var currentUrl by remember { mutableStateOf("") }
     
     var isLoading by remember { mutableStateOf(true) }
@@ -55,7 +58,22 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         }
     }
 
-    // واجهة عرض الفيديو الممتلئة (عند التوسيع)
+    // التعامل مع وضع الشاشة الكاملة (إخفاء شريط الحالة)
+    DisposableEffect(customView) {
+        val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+        if (customView != null) {
+            // تفعيل وضع Immersive (شاشة كاملة)
+            windowInsetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            // العودة للوضع العادي
+            windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose {
+            windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     if (customView != null) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(
@@ -70,12 +88,10 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                 },
                 modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
             ) {
-                // استخدام أيقونة Close
                 Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
             }
         }
     } else {
-        // الشاشة العادية
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -112,12 +128,11 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     )
                                     settings.javaScriptEnabled = true
                                     settings.domStorageEnabled = true
-                                    settings.mediaPlaybackRequiresUserGesture = false
+                                    settings.mediaPlaybackRequiresUserGesture = false // تشغيل تلقائي
                                     settings.javaScriptCanOpenWindowsAutomatically = false
                                     settings.setSupportMultipleWindows(false)
-                                    isVerticalScrollBarEnabled = false
-                                    isHorizontalScrollBarEnabled = false
-
+                                    
+                                    // كود JavaScript هجومي لإخفاء إعلانات VsEmbed
                                     webViewClient = object : WebViewClient() {
                                         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                             super.onPageStarted(view, url, favicon)
@@ -128,12 +143,23 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
+                                            // سكربت متقدم لإخفاء الإعلانات
                                             val jsCode = """
                                                 javascript:(function() {
-                                                    var ads = document.querySelectorAll('div[id*="ad"], div[class*="ad"], iframe[src*="ad"]');
-                                                    for(var i=0; i<ads.length; i++){ ads[i].style.display='none'; }
+                                                    // إخفاء العناصر التي تحتوي على كلمات دالة على الإعلانات
+                                                    var elements = document.querySelectorAll('*');
+                                                    for (var i = 0; i < elements.length; i++) {
+                                                        var el = elements[i];
+                                                        if (el.id && el.id.toLowerCase().includes('ad')) el.style.display = 'none';
+                                                        if (el.className && typeof el.className === 'string' && el.className.toLowerCase().includes('ad')) el.style.display = 'none';
+                                                        
+                                                        // إخفاء الأزرار التي تفتح روابط خارجية (مثل علي إكسبريس)
+                                                        if (el.tagName === 'A' && el.href && (el.href.includes('aliexpress') || el.href.includes('play.google'))) {
+                                                            el.style.display = 'none';
+                                                        }
+                                                    }
+                                                    // محاولة إغلاق أي نوافذ منبثقة
                                                     window.open = function(){};
-                                                    document.onclick = function(e) { e.stopPropagation(); };
                                                 })()
                                             """.trimIndent()
                                             view?.evaluateJavascript(jsCode, null)
@@ -142,8 +168,9 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                                             if (url?.startsWith("intent://") == true || 
                                                 url?.startsWith("market://") == true || 
-                                                url?.startsWith("https://play.google.com") == true) {
-                                                return true
+                                                url?.startsWith("https://play.google.com") == true ||
+                                                url?.contains("aliexpress") == true) {
+                                                return true // منع فتح التطبيقات الخارجية
                                             }
                                             return false
                                         }
@@ -181,10 +208,9 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(color = Color.White)
+                                    CircularProgressIndicator(color = Color.Red)
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
-                                    Text("الرجاء الانتظار...", color = Color.Gray, fontSize = 14.sp)
                                 }
                             }
                         }
