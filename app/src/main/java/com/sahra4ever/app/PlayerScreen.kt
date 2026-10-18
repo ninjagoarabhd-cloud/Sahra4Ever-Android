@@ -43,18 +43,15 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    // 1. جعلنا السيرفر الأول هو الافتراضي
+    // السيرفر الأول هو الافتراضي
     var selectedServer by remember { mutableStateOf(servers[0].second) }
     var currentUrl by remember { mutableStateOf("") }
     
     var isLoading by remember { mutableStateOf(true) }
     var customView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
-    
-    // 2. متغير للتحكم في إخفاء زر X
     var showCloseButton by remember { mutableStateOf(true) }
 
-    // إخفاء زر X بعد 3 ثواني من فتح الشاشة الكاملة
     LaunchedEffect(showCloseButton) {
         if (showCloseButton) {
             delay(3000)
@@ -64,10 +61,19 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
 
     LaunchedEffect(selectedServer) {
         isLoading = true
+        // بناء الرابط مع إضافة التشغيل التلقائي
         currentUrl = if (mediaType == "tv") {
-            "${selectedServer}tv/$movieId/1/1" 
+            if (selectedServer.contains("vsembed") || selectedServer.contains("vidsrc")) {
+                "${selectedServer}tv/$movieId/1/1?autoplay=1" // إضافة التشغيل التلقائي
+            } else {
+                "${selectedServer}tv/$movieId/1/1"
+            }
         } else {
-            "${selectedServer}movie/$movieId"
+            if (selectedServer.contains("vsembed") || selectedServer.contains("vidsrc")) {
+                "${selectedServer}movie/$movieId?autoplay=1" // إضافة التشغيل التلقائي
+            } else {
+                "${selectedServer}movie/$movieId"
+            }
         }
     }
 
@@ -90,7 +96,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                 factory = { customView!! },
                 modifier = Modifier.fillMaxSize()
             )
-            // 3. إخفاء زر X بعد 3 ثواني
             if (showCloseButton) {
                 IconButton(
                     onClick = {
@@ -141,7 +146,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     )
                                     settings.javaScriptEnabled = true
                                     settings.domStorageEnabled = true
-                                    settings.mediaPlaybackRequiresUserGesture = false // محاولة التشغيل التلقائي
+                                    settings.mediaPlaybackRequiresUserGesture = false 
                                     settings.javaScriptCanOpenWindowsAutomatically = false
                                     settings.setSupportMultipleWindows(false)
                                     isVerticalScrollBarEnabled = false
@@ -157,27 +162,29 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
-                                            // 4. سكربت هجومي لمسح الإعلانات
+                                            // سكربت قوي جداً لمسح الإعلانات
                                             val jsCode = """
                                                 javascript:(function() {
-                                                    // محاولة الضغط على زر التشغيل تلقائياً
-                                                    var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
-                                                    for(var i=0; i<playButtons.length; i++) {
-                                                        if(playButtons[i].innerText.includes('Play') || playButtons[i].className.includes('play')) {
-                                                            playButtons[i].click();
+                                                    // 1. إخفاء كل الصور الكبيرة التي قد تكون إعلانات
+                                                    var images = document.querySelectorAll('img');
+                                                    for (var i = 0; i < images.length; i++) {
+                                                        if (images[i].width > 100 || images[i].height > 100) {
+                                                            images[i].style.display = 'none';
                                                         }
                                                     }
 
-                                                    // إخفاء أي عنصر يحتوي على كلمات دالة على الإعلانات
-                                                    var elements = document.querySelectorAll('*');
-                                                    for (var i = 0; i < elements.length; i++) {
-                                                        var el = elements[i];
-                                                        var text = (el.innerText || "").toLowerCase();
-                                                        var id = (el.id || "").toLowerCase();
-                                                        var cls = (typeof el.className === 'string' ? el.className : "").toLowerCase();
+                                                    // 2. إخفاء الروابط والنوافذ
+                                                    var links = document.querySelectorAll('a');
+                                                    for (var i = 0; i < links.length; i++) {
+                                                        links[i].style.display = 'none';
+                                                    }
 
-                                                        if (text.includes('متجر') || text.includes('إعلان') || id.includes('ad') || cls.includes('ad') || text.includes('aliexpress')) {
-                                                            el.style.display = 'none';
+                                                    // 3. البحث عن زر التشغيل والضغط عليه
+                                                    var playButtons = document.querySelectorAll('button, div, span');
+                                                    for(var i=0; i<playButtons.length; i++) {
+                                                        var el = playButtons[i];
+                                                        if (el.className && typeof el.className === 'string' && (el.className.includes('play') || el.className.includes('Play'))) {
+                                                            el.click();
                                                         }
                                                     }
                                                     
@@ -203,7 +210,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onShowCustomView(view, callback)
                                             customView = view
                                             customViewCallback = callback
-                                            // إعادة إظهار زر X عند الدخول للشاشة الكاملة
                                             showCloseButton = true 
                                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                                         }
