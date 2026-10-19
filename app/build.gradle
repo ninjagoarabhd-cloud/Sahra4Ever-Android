@@ -57,6 +57,6 @@ dependencies {
     
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
-    // ✅ إضافة مكتبة Adblock Plus لحظر الإعلانات
-    implementation 'org.adblockplus:adblock-android-webview:4.4.0'
+    // ✅ استبدلنا Adblock Plus بمكتبة WebViewAdblock
+    implementation 'com.github.MonsterTechnoGits:WebViewAdblock:1.2'
 }

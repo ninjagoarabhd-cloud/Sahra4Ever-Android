@@ -29,6 +29,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.monstertechno.adblocker.AdBlockerWebView
+import com.monstertechno.adblocker.util.AdBlocker
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,8 +52,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
     var isLoading by remember { mutableStateOf(true) }
     
     var showOverlay by remember { mutableStateOf(true) }
-    
-    // متغيرات للتحكم في الشاشة الكاملة الخاصة بالمشغل
     var customView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
@@ -83,14 +83,12 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
         }
     }
 
-    // إذا تم تفعيل الشاشة الكاملة من داخل المشغل، اعرض الفيديو فقط
     if (customView != null) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(
                 factory = { customView!! },
                 modifier = Modifier.fillMaxSize()
             )
-            // زر إغلاق الشاشة الكاملة (يمكنك إخفاؤه أو تعديله)
             IconButton(
                 onClick = {
                     customViewCallback?.onCustomViewHidden()
@@ -98,102 +96,89 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                 },
                 modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
             ) {
-                // أيقونة إغلاق بسيطة
                 Text("X", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
         }
     } else {
-        // الشاشة العادية
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             if (currentUrl.isNotEmpty()) {
                 AndroidView(
                     factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.mediaPlaybackRequiresUserGesture = false 
-                            settings.javaScriptCanOpenWindowsAutomatically = false
-                            settings.setSupportMultipleWindows(false)
+                        val webView = WebView(ctx)
+                        
+                        // ✅ تهيئة مكتبة الحظر
+                        AdBlockerWebView.init(ctx).initializeWebView(webView)
+                        
+                        webView.layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        webView.settings.javaScriptEnabled = true
+                        webView.settings.domStorageEnabled = true
+                        webView.settings.mediaPlaybackRequiresUserGesture = false 
+                        webView.settings.javaScriptCanOpenWindowsAutomatically = false
+                        webView.settings.setSupportMultipleWindows(false)
 
-                            webViewClient = object : WebViewClient() {
-                                // حظر الشبكة للإعلانات
-                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                                    val url = request?.url.toString().lowercase()
-                                    if (url.contains("aliexpress") || url.contains("shein") || url.contains("doubleclick") || url.contains("popads")) {
-                                        return WebResourceResponse("text/plain", "utf-8", null)
-                                    }
-                                    return super.shouldInterceptRequest(view, request)
+                        webView.webViewClient = object : WebViewClient() {
+                            // ✅ تفعيل الحظر عبر الشبكة
+                            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                val url = request?.url.toString()
+                                return if (AdBlockerWebView.blockAds(view, url)) {
+                                    AdBlocker.createEmptyResource()
+                                } else {
+                                    super.shouldInterceptRequest(view, request)
                                 }
+                            }
 
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    super.onPageStarted(view, url, favicon)
-                                    isLoading = true
-                                }
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                isLoading = true
+                            }
 
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    isLoading = false
-                                    
-                                    // كود حقن CSS قوي جداً لإخفاء الإعلانات
-                                    val jsCode = """
-                                        javascript:(function() {
-                                            // إخفاء أي عنصر يحتوي على كلمة ad أو sponsor
-                                            var style = document.createElement('style');
-                                            style.innerHTML = '.ad, .ads, .adsbygoogle, [id*="ad-"], [id*="banner"], iframe[src*="ad"] { display: none !important; }';
-                                            document.head.appendChild(style);
-                                            
-                                            // إخفاء SHEIN و AliExpress
-                                            var elements = document.querySelectorAll('*');
-                                            for (var i = 0; i < elements.length; i++) {
-                                                var el = elements[i];
-                                                var text = (el.innerText || "").toLowerCase();
-                                                if (text.includes('shein') || text.includes('aliexpress')) {
-                                                    el.style.display = 'none';
-                                                }
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                isLoading = false
+                                
+                                // كود التشغيل التلقائي وإخفاء أي بقايا
+                                val jsCode = """
+                                    javascript:(function() {
+                                        setTimeout(function() {
+                                            var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
+                                            for(var j=0; j<playButtons.length; j++) {
+                                                playButtons[j].click();
                                             }
-                                            
-                                            // الضغط على زر التشغيل
-                                            setTimeout(function() {
-                                                var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
-                                                for(var j=0; j<playButtons.length; j++) {
-                                                    playButtons[j].click();
-                                                }
-                                            }, 1000);
-                                        })()
-                                    """.trimIndent()
-                                    view?.evaluateJavascript(jsCode, null)
-                                }
-
-                                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                    if (url?.startsWith("intent://") == true || 
-                                        url?.startsWith("market://") == true || 
-                                        url?.contains("aliexpress") == true ||
-                                        url?.contains("shein") == true) {
-                                        return true 
-                                    }
-                                    return false
-                                }
+                                        }, 1500);
+                                    })()
+                                """.trimIndent()
+                                view?.evaluateJavascript(jsCode, null)
                             }
 
-                            webChromeClient = object : WebChromeClient() {
-                                // إعطاء المتصفح نافذة ليضع فيها الفيديو عند التوسيع
-                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                    super.onShowCustomView(view, callback)
-                                    customView = view
-                                    customViewCallback = callback
+                            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                if (url?.startsWith("intent://") == true || 
+                                    url?.startsWith("market://") == true || 
+                                    url?.contains("aliexpress") == true ||
+                                    url?.contains("shein") == true) {
+                                    return true 
                                 }
-                                override fun onHideCustomView() {
-                                    super.onHideCustomView()
-                                    customView = null
-                                    customViewCallback = null
-                                }
+                                return false
                             }
-                            loadUrl(currentUrl)
                         }
+
+                        webView.webChromeClient = object : WebChromeClient() {
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                super.onShowCustomView(view, callback)
+                                customView = view
+                                customViewCallback = callback
+                            }
+                            override fun onHideCustomView() {
+                                super.onHideCustomView()
+                                customView = null
+                                customViewCallback = null
+                            }
+                        }
+                        
+                        webView.loadUrl(currentUrl)
+                        webView
                     },
                     update = { webView ->
                         webView.loadUrl(currentUrl)

@@ -10,6 +10,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://jitpack.io' } // ✅ أضفنا هذا السطر
     }
 }
 rootProject.name = 'Sahra4Ever'
