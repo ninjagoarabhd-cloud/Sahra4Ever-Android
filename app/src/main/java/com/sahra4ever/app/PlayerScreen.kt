@@ -35,8 +35,15 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-// ✅ أضفنا season و episode للدالة
-fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, episode: Int, onBack: () -> Unit) {
+fun PlayerScreen(
+    movieId: Int, 
+    mediaType: String, 
+    title: String, 
+    season: Int, 
+    episode: Int, 
+    initialServerIndex: Int, 
+    onBack: () -> Unit
+) {
     val context = LocalContext.current
     val activity = context as? Activity
 
@@ -47,7 +54,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, ep
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    var selectedServer by remember { mutableStateOf(servers[1].second) } 
+    var selectedServer by remember { mutableStateOf(servers[initialServerIndex].second) } 
     var currentUrl by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     
@@ -76,7 +83,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, ep
 
     LaunchedEffect(selectedServer) {
         isLoading = true
-        // ✅ استخدام season و episode في الرابط
         currentUrl = if (mediaType == "tv") {
             "${selectedServer}tv/$movieId/$season/$episode"
         } else {
@@ -159,7 +165,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, ep
                                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                                     if (url == null) return false
                                     val lowerUrl = url.lowercase()
-                                    
                                     if (lowerUrl.contains("vsembed") || lowerUrl.contains("embedmaster") || 
                                         lowerUrl.contains("vidlink") || lowerUrl.contains("vidsrc")) {
                                         return false 
@@ -172,7 +177,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, ep
                                 override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
                                     return false 
                                 }
-
                                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                                     super.onShowCustomView(view, callback)
                                     customView = view
@@ -187,9 +191,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, ep
                             loadUrl(currentUrl)
                         }
                     },
-                    update = { webView ->
-                        webView.loadUrl(currentUrl)
-                    },
+                    update = { webView -> webView.loadUrl(currentUrl) },
                     modifier = Modifier
                         .fillMaxSize()
                         .clickable(

@@ -16,7 +16,6 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 
                 NavHost(navController = navController, startDestination = "home") {
-                    // 1. الشاشة الرئيسية
                     composable("home") {
                         HomeScreen(
                             onMovieClick = { id, type, title ->
@@ -24,7 +23,6 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
-                    // 2. شاشة التفاصيل
                     composable("details/{movieId}/{mediaType}/{title}") { backStackEntry ->
                         val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
                         val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
@@ -34,19 +32,18 @@ class MainActivity : ComponentActivity() {
                             movieId = movieId,
                             mediaType = mediaType,
                             onBack = { navController.popBackStack() },
-                            onPlayClick = { id, type, t, season, episode ->
-                                // ✅ التوجيه لشاشة المشغل مع الموسم والحلقة
-                                navController.navigate("player/$id/$type/$t/$season/$episode")
+                            onPlayClick = { id, type, t, season, episode, serverIndex ->
+                                navController.navigate("player/$id/$type/$t/$season/$episode/$serverIndex")
                             }
                         )
                     }
-                    // 3. شاشة المشغل (المشاهدة)
-                    composable("player/{movieId}/{mediaType}/{title}/{season}/{episode}") { backStackEntry ->
+                    composable("player/{movieId}/{mediaType}/{title}/{season}/{episode}/{serverIndex}") { backStackEntry ->
                         val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
                         val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
                         val title = backStackEntry.arguments?.getString("title") ?: "بدون عنوان"
                         val season = backStackEntry.arguments?.getString("season")?.toIntOrNull() ?: 1
                         val episode = backStackEntry.arguments?.getString("episode")?.toIntOrNull() ?: 1
+                        val serverIndex = backStackEntry.arguments?.getString("serverIndex")?.toIntOrNull() ?: 0
                         
                         PlayerScreen(
                             movieId = movieId,
@@ -54,6 +51,7 @@ class MainActivity : ComponentActivity() {
                             title = title,
                             season = season,
                             episode = episode,
+                            initialServerIndex = serverIndex,
                             onBack = { navController.popBackStack() }
                         )
                     }
