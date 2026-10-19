@@ -56,7 +56,4 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
     
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-
-    // ✅ استبدلنا Adblock Plus بمكتبة WebViewAdblock
-    implementation 'com.github.MonsterTechnoGits:WebViewAdblock:1.2'
 }

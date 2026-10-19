@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
@@ -29,8 +30,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.monstertechno.adblocker.AdBlockerWebView
-import com.monstertechno.adblocker.util.AdBlocker
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,81 +103,96 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
             if (currentUrl.isNotEmpty()) {
                 AndroidView(
                     factory = { ctx ->
-                        val webView = WebView(ctx)
-                        
-                        // ✅ تهيئة مكتبة الحظر
-                        AdBlockerWebView.init(ctx).initializeWebView(webView)
-                        
-                        webView.layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        webView.settings.javaScriptEnabled = true
-                        webView.settings.domStorageEnabled = true
-                        webView.settings.mediaPlaybackRequiresUserGesture = false 
-                        webView.settings.javaScriptCanOpenWindowsAutomatically = false
-                        webView.settings.setSupportMultipleWindows(false)
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false 
+                            
+                            // منع فتح النوافذ المنبثقة
+                            settings.javaScriptCanOpenWindowsAutomatically = false
+                            settings.setSupportMultipleWindows(false)
 
-                        webView.webViewClient = object : WebViewClient() {
-                            // ✅ تفعيل الحظر عبر الشبكة
-                            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                                val url = request?.url.toString()
-                                return if (AdBlockerWebView.blockAds(view, url)) {
-                                    AdBlocker.createEmptyResource()
-                                } else {
-                                    super.shouldInterceptRequest(view, request)
+                            // قائمة النطاقات الإعلانية (بناءً على اقتراح Claude)
+                            val adDomains = listOf(
+                                "aliexpress", "shein", "popads", "2.1trk", "doubleclick", 
+                                "adservice", "googleads", "adsystem", "popcash", "propellerads"
+                            )
+
+                            webViewClient = object : WebViewClient() {
+                                // 1. حظر طلبات الشبكة
+                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                    val url = request?.url.toString().lowercase()
+                                    for (domain in adDomains) {
+                                        if (url.contains(domain)) {
+                                            return WebResourceResponse("text/plain", "utf-8", null) // قتل الطلب
+                                        }
+                                    }
+                                    return super.shouldInterceptRequest(view, request)
                                 }
-                            }
 
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                super.onPageStarted(view, url, favicon)
-                                isLoading = true
-                            }
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    super.onPageStarted(view, url, favicon)
+                                    isLoading = true
+                                }
 
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                isLoading = false
-                                
-                                // كود التشغيل التلقائي وإخفاء أي بقايا
-                                val jsCode = """
-                                    javascript:(function() {
-                                        setTimeout(function() {
-                                            var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
-                                            for(var j=0; j<playButtons.length; j++) {
-                                                playButtons[j].click();
-                                            }
-                                        }, 1500);
-                                    })()
-                                """.trimIndent()
-                                view?.evaluateJavascript(jsCode, null)
-                            }
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    isLoading = false
+                                    
+                                    // حقن JS لمسح الطبقات والتشغيل التلقائي
+                                    val jsCode = """
+                                        javascript:(function() {
+                                            window.open = function() { return null; };
+                                            setTimeout(function() {
+                                                var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
+                                                for(var j=0; j<playButtons.length; j++) {
+                                                    playButtons[j].click();
+                                                }
+                                            }, 1000);
+                                        })()
+                                    """.trimIndent()
+                                    view?.evaluateJavascript(jsCode, null)
+                                }
 
-                            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                if (url?.startsWith("intent://") == true || 
-                                    url?.startsWith("market://") == true || 
-                                    url?.contains("aliexpress") == true ||
-                                    url?.contains("shein") == true) {
+                                // 2. سلاح Claude الأقوى: منع أي تنقل خارج السيرفر الأساسي
+                                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                    if (url == null) return false
+                                    val lowerUrl = url.lowercase()
+                                    
+                                    // السماح فقط بالبقاء داخل السيرفر المختار
+                                    if (lowerUrl.contains("vsembed") || lowerUrl.contains("embedmaster") || 
+                                        lowerUrl.contains("vidlink") || lowerUrl.contains("vidsrc")) {
+                                        return false // اسمح بالتحميل
+                                    }
+                                    
+                                    // منع أي رابط آخر (إعلانات، متاجر، إلخ)
                                     return true 
                                 }
-                                return false
                             }
-                        }
 
-                        webView.webChromeClient = object : WebChromeClient() {
-                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                super.onShowCustomView(view, callback)
-                                customView = view
-                                customViewCallback = callback
+                            webChromeClient = object : WebChromeClient() {
+                                // منع النوافذ الجديدة نهائياً
+                                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+                                    return false 
+                                }
+
+                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                    super.onShowCustomView(view, callback)
+                                    customView = view
+                                    customViewCallback = callback
+                                }
+                                override fun onHideCustomView() {
+                                    super.onHideCustomView()
+                                    customView = null
+                                    customViewCallback = null
+                                }
                             }
-                            override fun onHideCustomView() {
-                                super.onHideCustomView()
-                                customView = null
-                                customViewCallback = null
-                            }
+                            loadUrl(currentUrl)
                         }
-                        
-                        webView.loadUrl(currentUrl)
-                        webView
                     },
                     update = { webView ->
                         webView.loadUrl(currentUrl)
