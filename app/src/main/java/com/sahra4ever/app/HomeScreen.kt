@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -46,7 +47,10 @@ private val BG_DARK = Color(0xFF0B0B12)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingClick: (WatchHistory) -> Unit) {
+fun HomeScreen(
+    onMovieClick: (Int, String, String) -> Unit,
+    onContinueWatchingClick: (WatchHistory) -> Unit
+) {
     val apiKey = "26097366152d7131fde0f53b80ee37de"
     val context = LocalContext.current
     
@@ -58,7 +62,6 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
     
     val historyList = remember { HistoryManager.getHistory(context) }
 
-    // جلب البيانات الأساسية
     LaunchedEffect(Unit) {
         try {
             val api = TMDBApi.create()
@@ -70,14 +73,13 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
         }
     }
 
-    // تأثير البحث التلقائي عند الكتابة
     LaunchedEffect(searchQuery) {
         if (searchQuery.isBlank()) {
             searchResults = emptyList()
             isSearching = false
         } else {
             isSearching = true
-            delay(500) // تأخير بسيط لتجنب الطلبات الكثيرة
+            delay(500)
             try {
                 val api = TMDBApi.create()
                 val response = api.searchMulti(apiKey, searchQuery)
@@ -98,7 +100,6 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
         val otherMovies = movies.drop(5)
 
         LazyColumn(modifier = Modifier.fillMaxSize().background(BG_DARK)) {
-            // الشريط العلوي
             item {
                 Row(
                     modifier = Modifier.padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
@@ -109,7 +110,7 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                 }
             }
 
-            // شريط البحث العريض
+            // شريط البحث
             item {
                 OutlinedTextField(
                     value = searchQuery,
@@ -126,7 +127,7 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .height(56.dp), // طويل وعريض
+                        .height(56.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color.DarkGray,
@@ -140,7 +141,7 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                 )
             }
 
-            // إذا كان المستخدم يبحث، نعرض نتائج البحث فقط
+            // نتائج البحث أو الواجهة الرئيسية
             if (searchQuery.isNotBlank()) {
                 if (isSearching) {
                     item {
@@ -170,8 +171,6 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                     }
                 }
             } else {
-                // الشاشة العادية (بدون بحث)
-                
                 // قسم متابعة المشاهدة
                 if (historyList.isNotEmpty()) {
                     item {
@@ -180,7 +179,6 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
                             items(historyList) { historyItem ->
-                                // بطاقة خاصة لمتابعة المشاهدة
                                 ContinueWatchingCard(historyItem) {
                                     onContinueWatchingClick(historyItem)
                                 }
@@ -189,7 +187,7 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                     }
                 }
 
-                // السلايدر
+                // السلايدر الرئيسي
                 item {
                     if (featuredMovies.isNotEmpty()) {
                         HeroSlider(movies = featuredMovies, onPlayClick = { movie ->
@@ -198,9 +196,10 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit, onContinueWatchingCl
                     }
                 }
 
-                // بقية الأقسام
-                item { SectionRow("التريند الآن", otherMovies, onMovieClick) }
+                // الأقسام السفلية
+                item { SectionRow("الترند الآن", otherMovies, onMovieClick) }
             }
+            
             item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
@@ -220,7 +219,6 @@ fun ContinueWatchingCard(item: WatchHistory, onClick: () -> Unit) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-            // شريط تقدم وهمي
             Box(modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(0.7f).height(3.dp).background(BRAND_RED))
         }
         Spacer(modifier = Modifier.height(4.dp))
@@ -229,6 +227,7 @@ fun ContinueWatchingCard(item: WatchHistory, onClick: () -> Unit) {
     }
 }
 
+// صفوف الأقسام
 @Composable
 fun SectionRow(title: String, movies: List<Movie>, onMovieClick: (Int, String, String) -> Unit) {
     if (movies.isEmpty()) return
@@ -244,5 +243,139 @@ fun SectionRow(title: String, movies: List<Movie>, onMovieClick: (Int, String, S
     }
 }
 
-// (باقي مكونات السلايدر HeroSlider و HeroSlide و MovieCard تبقى كما هي من الرد السابق)
-// ... (ضع هنا أكواد HeroSlider و HeroSlide و MovieCard التي أرسلتها لك سابقاً)
+// ------------------- السلايدر (Hero Slider) -------------------
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HeroSlider(
+    movies: List<Movie>,
+    onPlayClick: (Movie) -> Unit,
+) {
+    val pagerState = rememberPagerState(pageCount = { movies.size })
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(pagerState.currentPage, movies.size) {
+        delay(6000L)
+        if (movies.size > 1) {
+            val nextPage = (pagerState.currentPage + 1) % movies.size
+            scope.launch { pagerState.animateScrollToPage(nextPage) }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxWidth().height(500.dp)) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            HeroSlide(movie = movies[page], onPlayClick = onPlayClick)
+        }
+
+        Row(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            repeat(movies.size) { index ->
+                val isActive = index == pagerState.currentPage
+                Box(
+                    modifier = Modifier
+                        .height(6.dp)
+                        .width(if (isActive) 20.dp else 6.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (isActive) BRAND_RED else Color.White.copy(alpha = 0.35f))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroSlide(
+    movie: Movie,
+    onPlayClick: (Movie) -> Unit,
+) {
+    val context = LocalContext.current
+    var dominantColor by remember(movie.id) { mutableStateOf(Color(0xFF1A1024)) }
+
+    LaunchedEffect(movie.posterPath) {
+        val imageUrl = movie.posterPath?.let { TMDB_POSTER_BASE + it } ?: return@LaunchedEffect
+        val request = ImageRequest.Builder(context).data(imageUrl).allowHardware(false).build()
+        val result = context.imageLoader.execute(request)
+        if (result is SuccessResult) {
+            val bitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            bitmap?.let { bmp ->
+                Palette.from(bmp).generate { palette ->
+                    val swatch = palette?.darkVibrantSwatch ?: palette?.dominantSwatch
+                    swatch?.let { dominantColor = Color(it.rgb) }
+                }
+            }
+        }
+    }
+
+    val animatedColor by animateColorAsState(
+        targetValue = dominantColor,
+        animationSpec = tween(durationMillis = 700),
+        label = "heroGradientColor"
+    )
+
+    val title = movie.title ?: movie.name ?: "بدون عنوان"
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        AsyncImage(
+            model = (movie.backdropPath ?: movie.posterPath)?.let { TMDB_IMAGE_BASE + it },
+            contentDescription = title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+
+        Box(
+            modifier = Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, animatedColor.copy(alpha = 0.55f), BG_DARK)
+                )
+            )
+        )
+
+        Column(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp)
+        ) {
+            Text(
+                text = title.uppercase(),
+                color = Color.White,
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "دراما  •  الأكثر مشاهدة", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = { onPlayClick(movie) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(0.5f)
+            ) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.Black)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("شاهد الآن", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// ------------------- بطاقة الفيلم العادية -------------------
+@Composable
+fun MovieCard(movie: Movie, onClick: () -> Unit) {
+    val imageUrl = movie.posterPath?.let { "$TMDB_POSTER_BASE$it" } ?: ""
+    Column(
+        modifier = Modifier.width(110.dp).clickable { onClick() }
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.7f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.DarkGray)
+        )
+    }
+}
