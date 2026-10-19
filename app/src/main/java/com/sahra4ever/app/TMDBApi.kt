@@ -13,7 +13,6 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): MovieResponse
 
-    // جلب تفاصيل فيلم محدد
     @GET("movie/{id}")
     suspend fun getMovieDetails(
         @Path("id") id: Int,
@@ -21,13 +20,21 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): Movie
 
-    // جلب تفاصيل مسلسل محدد
     @GET("tv/{id}")
     suspend fun getTvDetails(
         @Path("id") id: Int,
         @Query("api_key") apiKey: String,
         @Query("language") language: String = "ar-SA"
     ): Movie
+
+    // ✅ الدالة الجديدة لجلب حلقات المسلسل
+    @GET("tv/{id}/season/{season_number}")
+    suspend fun getTvSeason(
+        @Path("id") id: Int,
+        @Path("season_number") seasonNumber: Int,
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "ar-SA"
+    ): SeasonResponse
 
     companion object {
         private const val BASE_URL = "https://api.themoviedb.org/3/"

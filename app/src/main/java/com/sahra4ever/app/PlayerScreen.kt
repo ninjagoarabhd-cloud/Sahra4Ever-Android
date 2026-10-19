@@ -35,7 +35,8 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> Unit) {
+// ✅ أضفنا season و episode للدالة
+fun PlayerScreen(movieId: Int, mediaType: String, title: String, season: Int, episode: Int, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
 
@@ -75,8 +76,9 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
 
     LaunchedEffect(selectedServer) {
         isLoading = true
+        // ✅ استخدام season و episode في الرابط
         currentUrl = if (mediaType == "tv") {
-            "${selectedServer}tv/$movieId/1/1"
+            "${selectedServer}tv/$movieId/$season/$episode"
         } else {
             "${selectedServer}movie/$movieId"
         }
@@ -112,23 +114,20 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                             settings.domStorageEnabled = true
                             settings.mediaPlaybackRequiresUserGesture = false 
                             
-                            // منع فتح النوافذ المنبثقة
                             settings.javaScriptCanOpenWindowsAutomatically = false
                             settings.setSupportMultipleWindows(false)
 
-                            // قائمة النطاقات الإعلانية (بناءً على اقتراح Claude)
                             val adDomains = listOf(
                                 "aliexpress", "shein", "popads", "2.1trk", "doubleclick", 
                                 "adservice", "googleads", "adsystem", "popcash", "propellerads"
                             )
 
                             webViewClient = object : WebViewClient() {
-                                // 1. حظر طلبات الشبكة
                                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                                     val url = request?.url.toString().lowercase()
                                     for (domain in adDomains) {
                                         if (url.contains(domain)) {
-                                            return WebResourceResponse("text/plain", "utf-8", null) // قتل الطلب
+                                            return WebResourceResponse("text/plain", "utf-8", null)
                                         }
                                     }
                                     return super.shouldInterceptRequest(view, request)
@@ -143,7 +142,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                                     super.onPageFinished(view, url)
                                     isLoading = false
                                     
-                                    // حقن JS لمسح الطبقات والتشغيل التلقائي
                                     val jsCode = """
                                         javascript:(function() {
                                             window.open = function() { return null; };
@@ -158,24 +156,19 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                                     view?.evaluateJavascript(jsCode, null)
                                 }
 
-                                // 2. سلاح Claude الأقوى: منع أي تنقل خارج السيرفر الأساسي
                                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                                     if (url == null) return false
                                     val lowerUrl = url.lowercase()
                                     
-                                    // السماح فقط بالبقاء داخل السيرفر المختار
                                     if (lowerUrl.contains("vsembed") || lowerUrl.contains("embedmaster") || 
                                         lowerUrl.contains("vidlink") || lowerUrl.contains("vidsrc")) {
-                                        return false // اسمح بالتحميل
+                                        return false 
                                     }
-                                    
-                                    // منع أي رابط آخر (إعلانات، متاجر، إلخ)
                                     return true 
                                 }
                             }
 
                             webChromeClient = object : WebChromeClient() {
-                                // منع النوافذ الجديدة نهائياً
                                 override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
                                     return false 
                                 }
