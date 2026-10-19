@@ -42,7 +42,15 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): MovieResponse
 
-    // (دوال التفاصيل والمواسم تبقى كما هي)
+    // 6. البحث الشامل
+    @GET("search/multi")
+    suspend fun searchMulti(
+        @Query("api_key") apiKey: String,
+        @Query("query") query: String,
+        @Query("language") language: String = "ar-SA"
+    ): MovieResponse
+
+    // 7. تفاصيل فيلم
     @GET("movie/{id}")
     suspend fun getMovieDetails(
         @Path("id") id: Int,
@@ -50,6 +58,7 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): Movie
 
+    // 8. تفاصيل مسلسل
     @GET("tv/{id}")
     suspend fun getTvDetails(
         @Path("id") id: Int,
@@ -57,6 +66,7 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): Movie
 
+    // 9. حلقات الموسم
     @GET("tv/{id}/season/{season_number}")
     suspend fun getTvSeason(
         @Path("id") id: Int,

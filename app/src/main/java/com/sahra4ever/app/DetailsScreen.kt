@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,10 +30,15 @@ import coil.compose.AsyncImage
 fun DetailsScreen(
     movieId: Int,
     mediaType: String,
+    initialSeason: Int = 1,
+    initialEpisode: Int = 1,
+    autoShowServers: Boolean = false,
     onBack: () -> Unit,
-    onPlayClick: (Int, String, String, Int, Int, Int) -> Unit 
+    onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
 ) {
-    val apiKey = "26097366152d7131fde0f53b80ee37de" 
+    val apiKey = "26097366152d7131fde0f53b80ee37de"
+    val context = LocalContext.current
+    
     var movie by remember { mutableStateOf<Movie?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
@@ -42,9 +48,9 @@ fun DetailsScreen(
     
     // حالة المسلسلات
     var selectedSeason by remember { mutableStateOf<Season?>(null) }
+    var selectedEpisodeNumber by remember { mutableIntStateOf(initialEpisode) }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(false) }
-    var selectedEpisodeNumber by remember { mutableStateOf(1) }
 
     val sheetState = rememberModalBottomSheetState()
 
@@ -66,19 +72,27 @@ fun DetailsScreen(
     fun fetchEpisodes(season: Season) {
         selectedSeason = season
         isLoadingEpisodes = true
-        // في حال عدم وجود حلقات، نضع حلقة افتراضية
-        if (season.episodeCount == null || season.episodeCount == 0) {
-            episodes = listOf(Episode(1, "الحلقة 1", ""))
-            isLoadingEpisodes = false
-            return
-        }
-        
-        // (هنا نقوم بجلب الحلقات الحقيقية من TMDB)
-        // للتبسيط، سنقوم بتوليدها بناءً على العدد
-        episodes = List(season.episodeCount) { index ->
-            Episode(index + 1, "الحلقة ${index + 1}", "وصف الحلقة")
-        }
+        // توليد الحلقات بناءً على العدد
+        val count = season.episodeCount ?: 1
+        episodes = List(count) { index -> Episode(index + 1, "الحلقة ${index + 1}", "") }
         isLoadingEpisodes = false
+    }
+
+    // التحقق من التشغيل التلقائي (متابعة المشاهدة)
+    LaunchedEffect(autoShowServers, movie) {
+        if (autoShowServers && movie != null) {
+            if (mediaType == "tv") {
+                // نجد الموسم المطلوب أو نأخذ الأول
+                val targetSeason = movie?.seasons?.find { it.seasonNumber == initialSeason } 
+                    ?: movie?.seasons?.firstOrNull { it.seasonNumber > 0 }
+                
+                if (targetSeason != null) {
+                    fetchEpisodes(targetSeason)
+                }
+            }
+            // فتح السيرفرات
+            showServerSheet = true 
+        }
     }
 
     Scaffold(
@@ -143,8 +157,14 @@ fun DetailsScreen(
                     Button(
                         onClick = {
                             if (mediaType == "tv") {
-                                showSeasonSheet = true
+                                // إذا كان مسلسل، نفتح المواسم أولاً (إلا إذا كنا قادمين من متابعة المشاهدة)
+                                if (autoShowServers) {
+                                    showServerSheet = true
+                                } else {
+                                    showSeasonSheet = true
+                                }
                             } else {
+                                // إذا كان فيلماً، نفتح السيرفرات مباشرة
                                 showServerSheet = true
                             }
                         },
@@ -154,7 +174,7 @@ fun DetailsScreen(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("مشاهدة الآن", fontSize = 18.sp, color = Color.White)
+                        Text(if (autoShowServers) "متابعة المشاهدة" else "مشاهدة الآن", fontSize = 18.sp, color = Color.White)
                     }
                 }
             }
@@ -175,8 +195,8 @@ fun DetailsScreen(
                                 Button(
                                     onClick = { fetchEpisodes(season) },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (selectedSeason == season) Color.White else Color.DarkGray,
-                                        contentColor = if (selectedSeason == season) Color.Black else Color.White
+                                        containerColor = if (selectedSeason?.seasonNumber == season.seasonNumber) Color.White else Color.DarkGray,
+                                        contentColor = if (selectedSeason?.seasonNumber == season.seasonNumber) Color.Black else Color.White
                                     )
                                 ) {
                                     Text(season.name ?: "الموسم ${season.seasonNumber}")
@@ -230,16 +250,34 @@ fun DetailsScreen(
                         Text("اختر السيرفر، إذا لم يعمل سيرفر جرب سيرفراً آخر.", color = Color.LightGray, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(24.dp))
 
+                        // دالة مساعدة للحفظ والتشغيل
+                        val onServerClick = { serverIndex: Int ->
+                            // 1. حفظ في السجل
+                            HistoryManager.addToHistory(
+                                context = context,
+                                item = WatchHistory(
+                                    id = movieId,
+                                    title = title,
+                                    type = mediaType,
+                                    posterPath = movie?.posterPath,
+                                    season = selectedSeason?.seasonNumber ?: 1,
+                                    episode = selectedEpisodeNumber
+                                )
+                            )
+                            // 2. الانتقال للمشغل
+                            onPlayClick(movieId, mediaType, title, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, serverIndex)
+                        }
+
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(
-                                onClick = { onPlayClick(movieId, mediaType, title, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, 0) },
+                                onClick = { onServerClick(0) },
                                 modifier = Modifier.weight(1f).height(60.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                 shape = RoundedCornerShape(30.dp)
                             ) { Text("Server 1", color = Color.Black, fontWeight = FontWeight.Bold) }
                             
                             Button(
-                                onClick = { onPlayClick(movieId, mediaType, title, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, 1) },
+                                onClick = { onServerClick(1) },
                                 modifier = Modifier.weight(1f).height(60.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                 shape = RoundedCornerShape(30.dp)
@@ -248,14 +286,14 @@ fun DetailsScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(
-                                onClick = { onPlayClick(movieId, mediaType, title, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, 2) },
+                                onClick = { onServerClick(2) },
                                 modifier = Modifier.weight(1f).height(60.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                 shape = RoundedCornerShape(30.dp)
                             ) { Text("Server 3", color = Color.Black, fontWeight = FontWeight.Bold) }
                             
                             Button(
-                                onClick = { onPlayClick(movieId, mediaType, title, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, 3) },
+                                onClick = { onServerClick(3) },
                                 modifier = Modifier.weight(1f).height(60.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                 shape = RoundedCornerShape(30.dp)
