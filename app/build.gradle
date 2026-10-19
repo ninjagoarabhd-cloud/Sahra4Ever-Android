@@ -55,6 +55,8 @@ dependencies {
     implementation 'io.coil-kt:coil-compose:2.5.0'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
     
-    // تمت إضافة مكتبة Coroutines هنا لدعم جلب البيانات
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // ✅ إضافة مكتبة Adblock Plus لحظر الإعلانات
+    implementation 'org.adblockplus:adblock-android-webview:4.4.0'
 }
