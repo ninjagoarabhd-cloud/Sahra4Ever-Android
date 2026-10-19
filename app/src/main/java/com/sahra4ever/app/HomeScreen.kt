@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb // ✅ هذا هو السطر المفقود
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -64,14 +65,13 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit) {
             CircularProgressIndicator(color = Color.Red)
         }
     } else {
-        val featuredMovies = movies.take(5) // 5 أفلام للسلايدر
+        val featuredMovies = movies.take(5)
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(DEFAULT_BG_COLOR)
         ) {
-            // الشريط العلوي (اللوجو)
             Row(
                 modifier = Modifier.padding(top = 40.dp, start = 16.dp, end = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -80,7 +80,6 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit) {
                 Text("4Ever", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             }
             
-            // التصنيفات
             LazyRow(
                 modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -101,12 +100,10 @@ fun HomeScreen(onMovieClick: (Int, String, String) -> Unit) {
                 }
             }
 
-            // السلايدر الرئيسي مع الألوان الديناميكية (كود كلود المدمج)
             if (featuredMovies.isNotEmpty()) {
                 HeroSlider(movies = featuredMovies, onMovieClick = onMovieClick)
             }
 
-            // قائمة الأفلام السفلية
             Text(
                 text = "الأكثر رواجاً الآن",
                 color = Color.White,
@@ -139,7 +136,6 @@ private fun HeroSlider(
     val pagerState = rememberPagerState(pageCount = { movies.size })
     val extractedColors = remember { mutableStateMapOf<Int, Color>() }
 
-    // استخراج اللون السائد (مكتبة Palette)
     LaunchedEffect(pagerState.currentPage, movies) {
         val currentMovie = movies.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
         if (extractedColors.containsKey(currentMovie.id)) return@LaunchedEffect
@@ -160,7 +156,6 @@ private fun HeroSlider(
     val currentMovie = movies.getOrNull(pagerState.currentPage)
     val targetColor = currentMovie?.let { extractedColors[it.id] } ?: DEFAULT_BG_COLOR
 
-    // تحريك اللون بسلاسة
     val animatedColor by animateColorAsState(
         targetValue = targetColor,
         animationSpec = tween(durationMillis = 800),
@@ -245,7 +240,6 @@ private fun HeroSlider(
             }
         }
         
-        // نقاط التنقل
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -282,7 +276,6 @@ fun MovieCard(movie: Movie, onClick: () -> Unit) {
     }
 }
 
-// دالة استخراج الصورة
 private suspend fun loadBitmapFromUrl(context: Context, url: String): Bitmap? {
     return try {
         val loader = ImageLoader(context)
