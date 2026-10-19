@@ -16,37 +16,36 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 
                 NavHost(navController = navController, startDestination = "home") {
-                    // 1. شاشة الرئيسية
                     composable("home") {
                         HomeScreen(
-                            onMovieClick = { id, type ->
-                                navController.navigate("details/$id/$type")
+                            onMovieClick = { id, type, title ->
+                                navController.navigate("details/$id/$type/$title")
                             }
                         )
                     }
-                    // 2. شاشة التفاصيل
-                    composable("details/{movieId}/{mediaType}") { backStackEntry ->
+                    composable("details/{movieId}/{mediaType}/{title}") { backStackEntry ->
                         val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
                         val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
+                        val title = backStackEntry.arguments?.getString("title") ?: "بدون عنوان"
                         
                         DetailsScreen(
                             movieId = movieId,
                             mediaType = mediaType,
                             onBack = { navController.popBackStack() },
-                            // هذا السطر يربط زر المشاهدة بشاشة المشغل
-                            onPlayClick = { id, type ->
-                                navController.navigate("player/$id/$type")
+                            onPlayClick = { id, type, t ->
+                                navController.navigate("player/$id/$type/$t")
                             }
                         )
                     }
-                    // 3. شاشة المشاهدة (المشغل)
-                    composable("player/{movieId}/{mediaType}") { backStackEntry ->
+                    composable("player/{movieId}/{mediaType}/{title}") { backStackEntry ->
                         val movieId = backStackEntry.arguments?.getString("movieId")?.toIntOrNull() ?: 0
                         val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
+                        val title = backStackEntry.arguments?.getString("title") ?: "بدون عنوان"
                         
                         PlayerScreen(
                             movieId = movieId,
                             mediaType = mediaType,
+                            title = title,
                             onBack = { navController.popBackStack() }
                         )
                     }

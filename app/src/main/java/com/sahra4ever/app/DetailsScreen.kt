@@ -21,10 +21,9 @@ import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-// 1. هنا أضفنا onPlayClick
-fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayClick: (Int, String) -> Unit) {
+// 1. تعديل الدالة لتمرير الاسم
+fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayClick: (Int, String, String) -> Unit) {
     
-    // (تنبيه: يفضل عدم مشاركة مفتاح الـ API علناً، لكن تركته هنا لكي يعمل التطبيق معك)
     val apiKey = "26097366152d7131fde0f53b80ee37de" 
     
     var movie by remember { mutableStateOf<Movie?>(null) }
@@ -72,7 +71,6 @@ fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayCli
                     .verticalScroll(rememberScrollState())
                     .padding(paddingValues)
             ) {
-                // صورة الغلاف الكبيرة
                 Box(modifier = Modifier.height(300.dp)) {
                     AsyncImage(
                         model = backdropUrl,
@@ -80,7 +78,6 @@ fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayCli
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
-                    // تدرج لوني لكي يندمج مع الخلفية السوداء
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -93,7 +90,6 @@ fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayCli
                     )
                 }
 
-                // تفاصيل الفيلم
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = title,
@@ -115,9 +111,9 @@ fun DetailsScreen(movieId: Int, mediaType: String, onBack: () -> Unit, onPlayCli
                     )
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // 2. هنا قمنا بتفعيل زر المشاهدة
+                    // 2. تعديل زر المشاهدة ليمرر الاسم (title)
                     Button(
-                        onClick = { onPlayClick(movieId, mediaType) },
+                        onClick = { onPlayClick(movieId, mediaType, title) }, 
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                         shape = RoundedCornerShape(8.dp)

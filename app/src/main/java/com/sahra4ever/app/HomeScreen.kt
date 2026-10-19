@@ -22,8 +22,9 @@ import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onMovieClick: (Int, String) -> Unit) { // أضفنا دالة للضغط
-    val apiKey = "26097366152d7131fde0f53b80ee37de" // تأكد من المفتاح هنا
+// 1. قمنا بتحديث الدالة لتستقبل اسم الفيلم (String)
+fun HomeScreen(onMovieClick: (Int, String, String) -> Unit) { 
+    val apiKey = "26097366152d7131fde0f53b80ee37de" 
     var movies by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
@@ -59,10 +60,10 @@ fun HomeScreen(onMovieClick: (Int, String) -> Unit) { // أضفنا دالة ل�
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(movies) { movie ->
-                    // تمرير حدث الضغط
                     MovieCard(movie) {
                         val type = if (movie.mediaType == "tv" || movie.name != null) "tv" else "movie"
-                        onMovieClick(movie.id, type)
+                        // 2. قمنا بتمرير الاسم (title) عند الضغط
+                        onMovieClick(movie.id, type, movie.title ?: movie.name ?: "بدون عنوان")
                     }
                 }
             }
@@ -75,7 +76,7 @@ fun MovieCard(movie: Movie, onClick: () -> Unit) {
     val imageUrl = if (movie.posterPath != null) "https://image.tmdb.org/t/p/w342${movie.posterPath}" else ""
     val title = movie.title ?: movie.name ?: "بدون عنوان"
 
-    Column(modifier = Modifier.clickable { onClick() }) { // أضفنا clickable
+    Column(modifier = Modifier.clickable { onClick() }) { 
         AsyncImage(
             model = imageUrl,
             contentDescription = title,

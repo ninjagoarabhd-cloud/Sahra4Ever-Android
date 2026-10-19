@@ -9,17 +9,19 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -30,7 +32,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
+fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> Unit) { // أضفنا title
     val context = LocalContext.current
     val activity = context as? Activity
 
@@ -41,12 +43,14 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    var selectedServer by remember { mutableStateOf(servers[1].second) } // جعلنا VsEmbed هو الافتراضي لكي نثبت لك أن الحيلة نجحت
+    var selectedServer by remember { mutableStateOf(servers[1].second) } 
     var currentUrl by remember { mutableStateOf("") }
-    
     var isLoading by remember { mutableStateOf(true) }
+    
+    // متغير للتحكم في إظهار وإخفاء الواجهة العربية (Overlay)
+    var showOverlay by remember { mutableStateOf(true) }
 
-    // 1. إجبار الهاتف على الوضع الأفقي وإخفاء شريط الحالة فوراً
+    // 1. إجبار الوضع الأفقي وإخفاء أشرطة النظام
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
@@ -54,7 +58,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
         
         onDispose {
-            // عند الخروج نعيد كل شيء لطبيعته
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
@@ -69,8 +72,8 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         }
     }
 
-    // الشاشة أصبحت كاملة 100% بدون أي أشرطة علوية
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // 2. مشغل الفيديو (WebView)
         if (currentUrl.isNotEmpty()) {
             AndroidView(
                 factory = { ctx ->
@@ -82,8 +85,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.mediaPlaybackRequiresUserGesture = false 
-                        
-                        // منع النوافذ المنبثقة
                         settings.javaScriptCanOpenWindowsAutomatically = false
                         settings.setSupportMultipleWindows(false)
 
@@ -97,7 +98,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
                                 
-                                // كود التشغيل التلقائي وإخفاء الإعلانات
                                 val jsCode = """
                                     javascript:(function() {
                                         var elements = document.querySelectorAll('*');
@@ -118,15 +118,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                 """.trimIndent()
                                 view?.evaluateJavascript(jsCode, null)
                             }
-
-                            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                if (url?.startsWith("intent://") == true || 
-                                    url?.startsWith("market://") == true || 
-                                    url?.contains("shein") == true) {
-                                    return true 
-                                }
-                                return false
-                            }
                         }
 
                         webChromeClient = object : WebChromeClient() {
@@ -143,31 +134,48 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                 update = { webView ->
                     webView.loadUrl(currentUrl)
                 },
-                modifier = Modifier.fillMaxSize()
+                // 3. اجعل شاشة اللمس تستجيب لإظهار وإخفاء الطبقة العلوية
+                modifier = Modifier.fillMaxSize().clickable { showOverlay = !showOverlay }
             )
-            
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color.Red)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
-                    }
+        }
+
+        // 4. الطبقة العلوية العربية (مثل Hayya TV)
+        if (showOverlay) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopStart)
+                    .background(Color.Black.copy(alpha = 0.6f)) // خلفية شفافة
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
                 }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
-        
-        // زر الرجوع شفاف في الزاوية العليا
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
-        ) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+
+        // شاشة التحميل
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.Red)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
+                }
+            }
         }
     }
 }
