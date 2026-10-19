@@ -43,6 +43,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
+    // السيرفر الأول هو الافتراضي
     var selectedServer by remember { mutableStateOf(servers[0].second) }
     var currentUrl by remember { mutableStateOf("") }
     
@@ -51,7 +52,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     var showCloseButton by remember { mutableStateOf(true) }
 
-    // إخفاء زر X بعد 3 ثواني
     LaunchedEffect(showCloseButton) {
         if (showCloseButton) {
             delay(3000)
@@ -138,9 +138,10 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     settings.javaScriptEnabled = true
                                     settings.domStorageEnabled = true
                                     settings.mediaPlaybackRequiresUserGesture = false 
-                                    settings.javaScriptCanOpenWindowsAutomatically = true
-                                    isVerticalScrollBarEnabled = false
-                                    isHorizontalScrollBarEnabled = false
+                                    
+                                    // ⛔ منع فتح النوافذ المنبثقة تماماً (هذا يحل مشكلة SHEIN)
+                                    settings.javaScriptCanOpenWindowsAutomatically = false
+                                    settings.setSupportMultipleWindows(false)
 
                                     webViewClient = object : WebViewClient() {
                                         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
@@ -152,30 +153,21 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
-                                            // كود JavaScript "جراحي" لمسح الإعلانات من VsEmbed
+                                            // كود يخفي شريط SHEIN إذا ظهر ويضغط على التشغيل
                                             val jsCode = """
                                                 javascript:(function() {
-                                                    // 1. إخفاء الإعلانات التي تظهر كصور أو أزرار
-                                                    var ads = document.querySelectorAll('img, a, div');
-                                                    for (var i = 0; i < ads.length; i++) {
-                                                        var el = ads[i];
-                                                        var src = (el.src || "").toLowerCase();
-                                                        var href = (el.href || "").toLowerCase();
-                                                        
-                                                        if (src.includes('aliexpress') || href.includes('aliexpress') || 
-                                                            src.includes('ad') || href.includes('ad') ||
-                                                            (el.innerText && el.innerText.includes('متجر'))) {
+                                                    var elements = document.querySelectorAll('*');
+                                                    for (var i = 0; i < elements.length; i++) {
+                                                        var el = elements[i];
+                                                        var text = (el.innerText || "").toLowerCase();
+                                                        if (text.includes('shein') || text.includes('aliexpress')) {
                                                             el.style.display = 'none';
                                                         }
                                                     }
-                                                    
-                                                    // 2. الضغط على زر التشغيل تلقائياً
+                                                    // محاولة التشغيل التلقائي
                                                     var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
                                                     for(var j=0; j<playButtons.length; j++) {
-                                                        if((playButtons[j].className && playButtons[j].className.includes('play')) || 
-                                                            (playButtons[j].innerText && playButtons[j].innerText.includes('Play'))) {
-                                                            playButtons[j].click();
-                                                        }
+                                                        playButtons[j].click();
                                                     }
                                                 })()
                                             """.trimIndent()
@@ -183,11 +175,11 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                         }
 
                                         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                            // إغلاق الإعلانات التي تحاول فتح تطبيقات خارجية
+                                            // منع تحويل الصفحة بالكامل إلى إعلان
                                             if (url?.startsWith("intent://") == true || 
                                                 url?.startsWith("market://") == true || 
-                                                url?.startsWith("aliexpress://") == true ||
-                                                url?.startsWith("https://play.google.com") == true) {
+                                                url?.startsWith("https://play.google.com") == true ||
+                                                url?.contains("shein") == true) {
                                                 return true 
                                             }
                                             return false
