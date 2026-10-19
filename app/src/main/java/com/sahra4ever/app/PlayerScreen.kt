@@ -43,7 +43,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    // السيرفر الأول هو الافتراضي
     var selectedServer by remember { mutableStateOf(servers[0].second) }
     var currentUrl by remember { mutableStateOf("") }
     
@@ -139,7 +138,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                     settings.domStorageEnabled = true
                                     settings.mediaPlaybackRequiresUserGesture = false 
                                     
-                                    // ⛔ منع فتح النوافذ المنبثقة تماماً (هذا يحل مشكلة SHEIN)
+                                    // منع النوافذ المنبثقة تماماً
                                     settings.javaScriptCanOpenWindowsAutomatically = false
                                     settings.setSupportMultipleWindows(false)
 
@@ -153,9 +152,10 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                             super.onPageFinished(view, url)
                                             isLoading = false
                                             
-                                            // كود يخفي شريط SHEIN إذا ظهر ويضغط على التشغيل
+                                            // 🔥 الكود السحري: الضغط التلقائي على زر التشغيل
                                             val jsCode = """
                                                 javascript:(function() {
+                                                    // إخفاء أي عنصر يحتوي على SHEIN أو إعلانات
                                                     var elements = document.querySelectorAll('*');
                                                     for (var i = 0; i < elements.length; i++) {
                                                         var el = elements[i];
@@ -164,18 +164,28 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
                                                             el.style.display = 'none';
                                                         }
                                                     }
-                                                    // محاولة التشغيل التلقائي
-                                                    var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
-                                                    for(var j=0; j<playButtons.length; j++) {
-                                                        playButtons[j].click();
-                                                    }
+
+                                                    // انتظر ثانية واحدة لكي يتم تحميل المشغل، ثم اضغط على زر التشغيل
+                                                    setTimeout(function() {
+                                                        var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button, [aria-label*="Play"]');
+                                                        for(var j=0; j<playButtons.length; j++) {
+                                                            // إذا كان العنصر زر تشغيل، اضغط عليه برمجياً
+                                                            if(playButtons[j].className.includes('play') || playButtons[j].innerText.includes('Play') || playButtons[j].tagName === 'BUTTON') {
+                                                                playButtons[j].click();
+                                                            }
+                                                        }
+                                                        // بعض المشغلات تستخدم الفيديو نفسه
+                                                        var videos = document.querySelectorAll('video');
+                                                        for(var k=0; k<videos.length; k++) {
+                                                            videos[k].play();
+                                                        }
+                                                    }, 1000);
                                                 })()
                                             """.trimIndent()
                                             view?.evaluateJavascript(jsCode, null)
                                         }
 
                                         override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                            // منع تحويل الصفحة بالكامل إلى إعلان
                                             if (url?.startsWith("intent://") == true || 
                                                 url?.startsWith("market://") == true || 
                                                 url?.startsWith("https://play.google.com") == true ||
