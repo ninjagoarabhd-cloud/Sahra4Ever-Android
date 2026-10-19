@@ -8,11 +8,13 @@ import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -28,11 +30,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> Unit) { // أضفنا title
+fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
 
@@ -47,10 +50,19 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
     var currentUrl by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     
-    // متغير للتحكم في إظهار وإخفاء الواجهة العربية (Overlay)
+    // متغيرات التحكم في الواجهة والملء
     var showOverlay by remember { mutableStateOf(true) }
+    var isFullscreen by remember { mutableStateOf(false) }
 
-    // 1. إجبار الوضع الأفقي وإخفاء أشرطة النظام
+    // إخفاء الواجهة العلوية تلقائياً بعد 3 ثواني
+    LaunchedEffect(showOverlay) {
+        if (showOverlay) {
+            delay(3000)
+            showOverlay = false
+        }
+    }
+
+    // إجبار الوضع الأفقي وإخفاء أشرطة النظام
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
@@ -73,7 +85,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // 2. مشغل الفيديو (WebView)
+        // مشغل الفيديو
         if (currentUrl.isNotEmpty()) {
             AndroidView(
                 factory = { ctx ->
@@ -98,13 +110,15 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                                 super.onPageFinished(view, url)
                                 isLoading = false
                                 
+                                // كود مسح الإعلانات والتشغيل التلقائي
                                 val jsCode = """
                                     javascript:(function() {
                                         var elements = document.querySelectorAll('*');
                                         for (var i = 0; i < elements.length; i++) {
                                             var el = elements[i];
                                             var text = (el.innerText || "").toLowerCase();
-                                            if (text.includes('shein') || text.includes('aliexpress')) {
+                                            var src = (el.src || "").toLowerCase();
+                                            if (text.includes('shein') || text.includes('aliexpress') || src.includes('aliexpress')) {
                                                 el.style.display = 'none';
                                             }
                                         }
@@ -118,14 +132,36 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                                 """.trimIndent()
                                 view?.evaluateJavascript(jsCode, null)
                             }
+
+                            // حظر روابط الإعلانات
+                            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                if (url?.startsWith("intent://") == true || 
+                                    url?.startsWith("market://") == true || 
+                                    url?.contains("aliexpress") == true ||
+                                    url?.contains("shein") == true) {
+                                    return true 
+                                }
+                                return false
+                            }
                         }
 
                         webChromeClient = object : WebChromeClient() {
+                            // عندما يضغط المستخدم على زر التوسيع [ ]
                             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                                 super.onShowCustomView(view, callback)
+                                isFullscreen = true
+                                showOverlay = false // إخفاء الواجهة العربية
+                                val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+                                windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
                             }
+
+                            // عندما يخرج المستخدم من وضع التوسيع
                             override fun onHideCustomView() {
                                 super.onHideCustomView()
+                                isFullscreen = false
+                                showOverlay = true
+                                val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+                                windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
                             }
                         }
                         loadUrl(currentUrl)
@@ -134,18 +170,29 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
                 update = { webView ->
                     webView.loadUrl(currentUrl)
                 },
-                // 3. اجعل شاشة اللمس تستجيب لإظهار وإخفاء الطبقة العلوية
-                modifier = Modifier.fillMaxSize().clickable { showOverlay = !showOverlay }
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null // إزالة تأثير الضغط
+                    ) {
+                        // عند لمس الشاشة، أظهر الواجهة العلوية
+                        showOverlay = !showOverlay 
+                    }
             )
         }
 
-        // 4. الطبقة العلوية العربية (مثل Hayya TV)
-        if (showOverlay) {
+        // الواجهة العربية العلوية (تظهر وتختفي)
+        AnimatedVisibility(
+            visible = showOverlay && !isFullscreen, // لا تظهر أبداً في وضع التوسيع الكامل
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopStart)
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.TopStart)
-                    .background(Color.Black.copy(alpha = 0.6f)) // خلفية شفافة
+                    .background(Color.Black.copy(alpha = 0.6f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -165,9 +212,7 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
         // شاشة التحميل
         if (isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
+                modifier = Modifier.fillMaxSize().background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
