@@ -3,11 +3,10 @@ package com.sahra4ever.app
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -50,11 +49,12 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
     var currentUrl by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     
-    // متغيرات التحكم في الواجهة والملء
     var showOverlay by remember { mutableStateOf(true) }
-    var isFullscreen by remember { mutableStateOf(false) }
+    
+    // متغيرات للتحكم في الشاشة الكاملة الخاصة بالمشغل
+    var customView by remember { mutableStateOf<View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
-    // إخفاء الواجهة العلوية تلقائياً بعد 3 ثواني
     LaunchedEffect(showOverlay) {
         if (showOverlay) {
             delay(3000)
@@ -62,7 +62,6 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
         }
     }
 
-    // إجبار الوضع الأفقي وإخفاء أشرطة النظام
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
@@ -84,141 +83,160 @@ fun PlayerScreen(movieId: Int, mediaType: String, title: String, onBack: () -> U
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // مشغل الفيديو
-        if (currentUrl.isNotEmpty()) {
+    // إذا تم تفعيل الشاشة الكاملة من داخل المشغل، اعرض الفيديو فقط
+    if (customView != null) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.mediaPlaybackRequiresUserGesture = false 
-                        settings.javaScriptCanOpenWindowsAutomatically = false
-                        settings.setSupportMultipleWindows(false)
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                super.onPageStarted(view, url, favicon)
-                                isLoading = true
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                isLoading = false
-                                
-                                // كود مسح الإعلانات والتشغيل التلقائي
-                                val jsCode = """
-                                    javascript:(function() {
-                                        var elements = document.querySelectorAll('*');
-                                        for (var i = 0; i < elements.length; i++) {
-                                            var el = elements[i];
-                                            var text = (el.innerText || "").toLowerCase();
-                                            var src = (el.src || "").toLowerCase();
-                                            if (text.includes('shein') || text.includes('aliexpress') || src.includes('aliexpress')) {
-                                                el.style.display = 'none';
-                                            }
-                                        }
-                                        setTimeout(function() {
-                                            var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
-                                            for(var j=0; j<playButtons.length; j++) {
-                                                playButtons[j].click();
-                                            }
-                                        }, 1000);
-                                    })()
-                                """.trimIndent()
-                                view?.evaluateJavascript(jsCode, null)
-                            }
-
-                            // حظر روابط الإعلانات
-                            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                if (url?.startsWith("intent://") == true || 
-                                    url?.startsWith("market://") == true || 
-                                    url?.contains("aliexpress") == true ||
-                                    url?.contains("shein") == true) {
-                                    return true 
-                                }
-                                return false
-                            }
-                        }
-
-                        webChromeClient = object : WebChromeClient() {
-                            // عندما يضغط المستخدم على زر التوسيع [ ]
-                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                super.onShowCustomView(view, callback)
-                                isFullscreen = true
-                                showOverlay = false // إخفاء الواجهة العربية
-                                val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
-                                windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
-                            }
-
-                            // عندما يخرج المستخدم من وضع التوسيع
-                            override fun onHideCustomView() {
-                                super.onHideCustomView()
-                                isFullscreen = false
-                                showOverlay = true
-                                val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
-                                windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
-                            }
-                        }
-                        loadUrl(currentUrl)
-                    }
-                },
-                update = { webView ->
-                    webView.loadUrl(currentUrl)
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null // إزالة تأثير الضغط
-                    ) {
-                        // عند لمس الشاشة، أظهر الواجهة العلوية
-                        showOverlay = !showOverlay 
-                    }
+                factory = { customView!! },
+                modifier = Modifier.fillMaxSize()
             )
-        }
-
-        // الواجهة العربية العلوية (تظهر وتختفي)
-        AnimatedVisibility(
-            visible = showOverlay && !isFullscreen, // لا تظهر أبداً في وضع التوسيع الكامل
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopStart)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // زر إغلاق الشاشة الكاملة (يمكنك إخفاؤه أو تعديله)
+            IconButton(
+                onClick = {
+                    customViewCallback?.onCustomViewHidden()
+                    customView = null
+                },
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = title,
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                // أيقونة إغلاق بسيطة
+                Text("X", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
         }
+    } else {
+        // الشاشة العادية
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            if (currentUrl.isNotEmpty()) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false 
+                            settings.javaScriptCanOpenWindowsAutomatically = false
+                            settings.setSupportMultipleWindows(false)
 
-        // شاشة التحميل
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                contentAlignment = Alignment.Center
+                            webViewClient = object : WebViewClient() {
+                                // حظر الشبكة للإعلانات
+                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                    val url = request?.url.toString().lowercase()
+                                    if (url.contains("aliexpress") || url.contains("shein") || url.contains("doubleclick") || url.contains("popads")) {
+                                        return WebResourceResponse("text/plain", "utf-8", null)
+                                    }
+                                    return super.shouldInterceptRequest(view, request)
+                                }
+
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    super.onPageStarted(view, url, favicon)
+                                    isLoading = true
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    isLoading = false
+                                    
+                                    // كود حقن CSS قوي جداً لإخفاء الإعلانات
+                                    val jsCode = """
+                                        javascript:(function() {
+                                            // إخفاء أي عنصر يحتوي على كلمة ad أو sponsor
+                                            var style = document.createElement('style');
+                                            style.innerHTML = '.ad, .ads, .adsbygoogle, [id*="ad-"], [id*="banner"], iframe[src*="ad"] { display: none !important; }';
+                                            document.head.appendChild(style);
+                                            
+                                            // إخفاء SHEIN و AliExpress
+                                            var elements = document.querySelectorAll('*');
+                                            for (var i = 0; i < elements.length; i++) {
+                                                var el = elements[i];
+                                                var text = (el.innerText || "").toLowerCase();
+                                                if (text.includes('shein') || text.includes('aliexpress')) {
+                                                    el.style.display = 'none';
+                                                }
+                                            }
+                                            
+                                            // الضغط على زر التشغيل
+                                            setTimeout(function() {
+                                                var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
+                                                for(var j=0; j<playButtons.length; j++) {
+                                                    playButtons[j].click();
+                                                }
+                                            }, 1000);
+                                        })()
+                                    """.trimIndent()
+                                    view?.evaluateJavascript(jsCode, null)
+                                }
+
+                                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                    if (url?.startsWith("intent://") == true || 
+                                        url?.startsWith("market://") == true || 
+                                        url?.contains("aliexpress") == true ||
+                                        url?.contains("shein") == true) {
+                                        return true 
+                                    }
+                                    return false
+                                }
+                            }
+
+                            webChromeClient = object : WebChromeClient() {
+                                // إعطاء المتصفح نافذة ليضع فيها الفيديو عند التوسيع
+                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                    super.onShowCustomView(view, callback)
+                                    customView = view
+                                    customViewCallback = callback
+                                }
+                                override fun onHideCustomView() {
+                                    super.onHideCustomView()
+                                    customView = null
+                                    customViewCallback = null
+                                }
+                            }
+                            loadUrl(currentUrl)
+                        }
+                    },
+                    update = { webView ->
+                        webView.loadUrl(currentUrl)
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            showOverlay = !showOverlay 
+                        }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = showOverlay,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopStart)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Color.Red)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Color.Red)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
+                    }
                 }
             }
         }
