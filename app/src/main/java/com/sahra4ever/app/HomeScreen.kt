@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.ExperimentalFoundationApi // ✅ تم إضافة الاستيراد
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -165,6 +166,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class) // ✅ تم إضافة الإذن هنا
 @Composable
 private fun HomeContent(
     onMovieClick: (Int, String, String) -> Unit,
@@ -178,7 +180,6 @@ private fun HomeContent(
     var error by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    // ✅ استخدام HistoryManager الخاص بنا
     val history = remember { HistoryManager.getHistory(context) }
 
     var query by remember { mutableStateOf("") }
@@ -375,6 +376,7 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
 /*  المحتوى الرئيسي                                                      */
 /* ------------------------------------------------------------------ */
 
+@OptIn(ExperimentalFoundationApi::class) // ✅ تم إضافة الإذن هنا أيضاً
 @Composable
 private fun HomeFeed(
     heroes: List<Movie>,
@@ -631,7 +633,6 @@ private fun ContinueCard(item: WatchHistory, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.align(Alignment.BottomStart).padding(start = 10.dp, end = 10.dp, bottom = 12.dp)
         )
-        // شريط تقدم وهمي (لأننا لا نستطيع حساب وقت التوقف في WebView)
         Box(
             Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp)
                 .background(Color.White.copy(alpha = 0.25f))
@@ -639,7 +640,7 @@ private fun ContinueCard(item: WatchHistory, onClick: () -> Unit) {
             Box(
                 Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(0.4f) // 40% مشاهدة
+                    .fillMaxWidth(0.4f)
                     .background(Brush.horizontalGradient(listOf(Purple, Pink)))
             )
         }
