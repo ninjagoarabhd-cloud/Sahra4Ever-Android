@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,7 +26,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -43,18 +41,22 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         "Server 4" to "https://vidsrc.wiki/embed/"
     )
 
-    var selectedServer by remember { mutableStateOf(servers[0].second) }
+    var selectedServer by remember { mutableStateOf(servers[1].second) } // جعلنا VsEmbed هو الافتراضي لكي نثبت لك أن الحيلة نجحت
     var currentUrl by remember { mutableStateOf("") }
     
     var isLoading by remember { mutableStateOf(true) }
-    var customView by remember { mutableStateOf<View?>(null) }
-    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
-    var showCloseButton by remember { mutableStateOf(true) }
 
-    LaunchedEffect(showCloseButton) {
-        if (showCloseButton) {
-            delay(3000)
-            showCloseButton = false
+    // 1. إجبار الهاتف على الوضع الأفقي وإخفاء شريط الحالة فوراً
+    DisposableEffect(Unit) {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+        windowInsetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
+        
+        onDispose {
+            // عند الخروج نعيد كل شيء لطبيعته
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -67,197 +69,105 @@ fun PlayerScreen(movieId: Int, mediaType: String, onBack: () -> Unit) {
         }
     }
 
-    DisposableEffect(customView) {
-        val windowInsetsController = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
-        if (customView != null) {
-            windowInsetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            windowInsetsController?.hide(WindowInsetsCompat.Type.systemBars())
-        } else {
-            windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
-        }
-        onDispose {
-            windowInsetsController?.show(WindowInsetsCompat.Type.systemBars())
-        }
-    }
-
-    if (customView != null) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // الشاشة أصبحت كاملة 100% بدون أي أشرطة علوية
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        if (currentUrl.isNotEmpty()) {
             AndroidView(
-                factory = { customView!! },
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.mediaPlaybackRequiresUserGesture = false 
+                        
+                        // منع النوافذ المنبثقة
+                        settings.javaScriptCanOpenWindowsAutomatically = false
+                        settings.setSupportMultipleWindows(false)
+
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                isLoading = true
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                isLoading = false
+                                
+                                // كود التشغيل التلقائي وإخفاء الإعلانات
+                                val jsCode = """
+                                    javascript:(function() {
+                                        var elements = document.querySelectorAll('*');
+                                        for (var i = 0; i < elements.length; i++) {
+                                            var el = elements[i];
+                                            var text = (el.innerText || "").toLowerCase();
+                                            if (text.includes('shein') || text.includes('aliexpress')) {
+                                                el.style.display = 'none';
+                                            }
+                                        }
+                                        setTimeout(function() {
+                                            var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button');
+                                            for(var j=0; j<playButtons.length; j++) {
+                                                playButtons[j].click();
+                                            }
+                                        }, 1000);
+                                    })()
+                                """.trimIndent()
+                                view?.evaluateJavascript(jsCode, null)
+                            }
+
+                            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                if (url?.startsWith("intent://") == true || 
+                                    url?.startsWith("market://") == true || 
+                                    url?.contains("shein") == true) {
+                                    return true 
+                                }
+                                return false
+                            }
+                        }
+
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                super.onShowCustomView(view, callback)
+                            }
+                            override fun onHideCustomView() {
+                                super.onHideCustomView()
+                            }
+                        }
+                        loadUrl(currentUrl)
+                    }
+                },
+                update = { webView ->
+                    webView.loadUrl(currentUrl)
+                },
                 modifier = Modifier.fillMaxSize()
             )
-            if (showCloseButton) {
-                IconButton(
-                    onClick = {
-                        customViewCallback?.onCustomViewHidden()
-                        customView = null
-                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
-                }
-            }
-        }
-    } else {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("المشاهدة", color = Color.White) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "رجوع", tint = Color.White)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
-                )
-            },
-            containerColor = Color.Black
-        ) { paddingValues ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-            ) {
+            
+            if (isLoading) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f) 
+                        .fillMaxSize()
                         .background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (currentUrl.isNotEmpty()) {
-                        AndroidView(
-                            factory = { ctx ->
-                                WebView(ctx).apply {
-                                    layoutParams = ViewGroup.LayoutParams(
-                                        ViewGroup.LayoutParams.MATCH_PARENT,
-                                        ViewGroup.LayoutParams.MATCH_PARENT
-                                    )
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.mediaPlaybackRequiresUserGesture = false 
-                                    
-                                    // منع النوافذ المنبثقة تماماً
-                                    settings.javaScriptCanOpenWindowsAutomatically = false
-                                    settings.setSupportMultipleWindows(false)
-
-                                    webViewClient = object : WebViewClient() {
-                                        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                            super.onPageStarted(view, url, favicon)
-                                            isLoading = true
-                                        }
-
-                                        override fun onPageFinished(view: WebView?, url: String?) {
-                                            super.onPageFinished(view, url)
-                                            isLoading = false
-                                            
-                                            // 🔥 الكود السحري: الضغط التلقائي على زر التشغيل
-                                            val jsCode = """
-                                                javascript:(function() {
-                                                    // إخفاء أي عنصر يحتوي على SHEIN أو إعلانات
-                                                    var elements = document.querySelectorAll('*');
-                                                    for (var i = 0; i < elements.length; i++) {
-                                                        var el = elements[i];
-                                                        var text = (el.innerText || "").toLowerCase();
-                                                        if (text.includes('shein') || text.includes('aliexpress')) {
-                                                            el.style.display = 'none';
-                                                        }
-                                                    }
-
-                                                    // انتظر ثانية واحدة لكي يتم تحميل المشغل، ثم اضغط على زر التشغيل
-                                                    setTimeout(function() {
-                                                        var playButtons = document.querySelectorAll('button, div[class*="play"], .vjs-big-play-button, [aria-label*="Play"]');
-                                                        for(var j=0; j<playButtons.length; j++) {
-                                                            // إذا كان العنصر زر تشغيل، اضغط عليه برمجياً
-                                                            if(playButtons[j].className.includes('play') || playButtons[j].innerText.includes('Play') || playButtons[j].tagName === 'BUTTON') {
-                                                                playButtons[j].click();
-                                                            }
-                                                        }
-                                                        // بعض المشغلات تستخدم الفيديو نفسه
-                                                        var videos = document.querySelectorAll('video');
-                                                        for(var k=0; k<videos.length; k++) {
-                                                            videos[k].play();
-                                                        }
-                                                    }, 1000);
-                                                })()
-                                            """.trimIndent()
-                                            view?.evaluateJavascript(jsCode, null)
-                                        }
-
-                                        override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                                            if (url?.startsWith("intent://") == true || 
-                                                url?.startsWith("market://") == true || 
-                                                url?.startsWith("https://play.google.com") == true ||
-                                                url?.contains("shein") == true) {
-                                                return true 
-                                            }
-                                            return false
-                                        }
-                                    }
-
-                                    webChromeClient = object : WebChromeClient() {
-                                        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                            super.onShowCustomView(view, callback)
-                                            customView = view
-                                            customViewCallback = callback
-                                            showCloseButton = true 
-                                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                        }
-
-                                        override fun onHideCustomView() {
-                                            super.onHideCustomView()
-                                            customView = null
-                                            customViewCallback = null
-                                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                        }
-                                    }
-                                    loadUrl(currentUrl)
-                                }
-                            },
-                            update = { webView ->
-                                webView.loadUrl(currentUrl)
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        
-                        if (isLoading) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(color = Color.Red)
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(servers) { server ->
-                        Button(
-                            onClick = { selectedServer = server.second },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedServer == server.second) Color.Red else Color.DarkGray
-                            )
-                        ) {
-                            Text(server.first, color = Color.White)
-                        }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Color.Red)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("جاري تهيئة مشغل البث...", color = Color.White, fontSize = 16.sp)
                     }
                 }
             }
+        }
+        
+        // زر الرجوع شفاف في الزاوية العليا
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+        ) {
+            Icon(Icons.Default.ArrowBack, contentDescription = "رجوع", tint = Color.White)
         }
     }
 }
