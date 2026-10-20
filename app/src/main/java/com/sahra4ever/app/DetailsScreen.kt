@@ -1,308 +1,372 @@
 package com.sahra4ever.app
 
+import android.content.Context
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.Shadow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
+import androidx.palette.graphics.Palette
 import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+private const val API_KEY = "26097366152d7131fde0f53b80ee37de"
+private const val IMG = "https://image.tmdb.org/t/p/"
+
+private val Pink = Color(0xFFFF2FA6)
+private val Purple = Color(0xFF7B2CFF)
+private val Gold = Color(0xFFFFC83D)
+private val Ink = Color(0xFF0F0E14)
+private val DefaultTop = Color(0xFF3A3650)
+private val GlassFill = Color.White.copy(alpha = 0.12f)
+private val GlassStroke = Color.White.copy(alpha = 0.22f)
+private val Muted = Color(0xFFD0CFDA)
+
+private fun img(path: String?, size: String = "w500"): String? = path?.let { "$IMG$size$it" }
+
+private data class DetailsUi(
+    val title: String,
+    val overview: String,
+    val backdropPath: String?,
+    val posterPath: String?,
+    val rating: Double?,
+    val date: String?
+)
+
+private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
+    val api = TMDBApi.create()
+    return if (mediaType == "tv") {
+        val d = api.getTvDetails(id, API_KEY)
+        DetailsUi(
+            title = d.name ?: "",
+            overview = d.overview ?: "",
+            backdropPath = d.backdropPath,
+            posterPath = d.posterPath,
+            rating = d.voteAverage,
+            date = d.firstAirDate
+        )
+    } else {
+        val d = api.getMovieDetails(id, API_KEY)
+        DetailsUi(
+            title = d.title ?: "",
+            overview = d.overview ?: "",
+            backdropPath = d.backdropPath,
+            posterPath = d.posterPath,
+            rating = d.voteAverage,
+            date = d.releaseDate
+        )
+    }
+}
+
+private suspend fun extractColor(context: Context, url: String?): Color? {
+    if (url == null) return null
+    return withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(context).data(url).allowHardware(false).size(200).build()
+            val bitmap = (context.imageLoader.execute(request) as? SuccessResult)?.drawable?.toBitmap()
+                ?: return@withContext null
+            val p = Palette.from(bitmap).maximumColorCount(16).generate()
+            val swatch = p.darkVibrantSwatch ?: p.vibrantSwatch ?: p.darkMutedSwatch ?: p.dominantSwatch
+            swatch?.let { Color(it.rgb) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
+
 @Composable
 fun DetailsScreen(
     movieId: Int,
     mediaType: String,
-    initialSeason: Int = 1,
-    initialEpisode: Int = 1,
-    autoShowServers: Boolean = false,
     onBack: () -> Unit,
     onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
 ) {
-    val apiKey = "26097366152d7131fde0f53b80ee37de"
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        DetailsContent(movieId, mediaType, onBack, onPlayClick)
+    }
+}
+
+@Composable
+private fun DetailsContent(
+    movieId: Int,
+    mediaType: String,
+    onBack: () -> Unit,
+    onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
+) {
     val context = LocalContext.current
-    
-    var movie by remember { mutableStateOf<Movie?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
+    var ui by remember(movieId, mediaType) { mutableStateOf<DetailsUi?>(null) }
+    var accent by remember(movieId, mediaType) { mutableStateOf<Color?>(null) }
+    var error by remember { mutableStateOf(false) }
+    var reloadKey by remember { mutableIntStateOf(0) }
 
-    // نوافذ منبثقة
-    var showSeasonSheet by remember { mutableStateOf(false) }
-    var showServerSheet by remember { mutableStateOf(false) }
-    
-    // حالة المسلسلات
-    var selectedSeason by remember { mutableStateOf<Season?>(null) }
-    var selectedEpisodeNumber by remember { mutableIntStateOf(initialEpisode) }
-    var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
-    var isLoadingEpisodes by remember { mutableStateOf(false) }
-
-    val sheetState = rememberModalBottomSheetState()
-
-    LaunchedEffect(movieId) {
+    LaunchedEffect(movieId, mediaType, reloadKey) {
+        error = false
         try {
-            val api = TMDBApi.create()
-            movie = if (mediaType == "tv") {
-                api.getTvDetails(movieId, apiKey)
-            } else {
-                api.getMovieDetails(movieId, apiKey)
-            }
-            isLoading = false
+            val d = fetchDetails(movieId, mediaType)
+            ui = d
+            accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            isLoading = false
+            error = true
         }
     }
 
-    // دالة جلب الحلقات
-    fun fetchEpisodes(season: Season) {
-        selectedSeason = season
-        isLoadingEpisodes = true
-        // توليد الحلقات بناءً على العدد
-        val count = season.episodeCount ?: 1
-        episodes = List(count) { index -> Episode(index + 1, "الحلقة ${index + 1}", "") }
-        isLoadingEpisodes = false
-    }
+    val top by animateColorAsState(
+        accent?.let { lerpColor(it, Color.Black, 0.3f) } ?: DefaultTop, tween(700), label = "top"
+    )
+    val bottom by animateColorAsState(
+        accent?.let { lerpColor(it, Ink, 0.88f) } ?: Ink, tween(700), label = "bottom"
+    )
 
-    // التحقق من التشغيل التلقائي (متابعة المشاهدة)
-    LaunchedEffect(autoShowServers, movie) {
-        if (autoShowServers && movie != null) {
-            if (mediaType == "tv") {
-                // نجد الموسم المطلوب أو نأخذ الأول
-                val targetSeason = movie?.seasons?.find { it.seasonNumber == initialSeason } 
-                    ?: movie?.seasons?.firstOrNull { it.seasonNumber > 0 }
-                
-                if (targetSeason != null) {
-                    fetchEpisodes(targetSeason)
-                }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(top, bottom)))
+    ) {
+        val d = ui
+        when {
+            d != null -> DetailsBody(d) {
+                // ✅ إضافة العمل إلى "متابعة المشاهدة" قبل فتح المشغل
+                HistoryManager.addToHistory(
+                    context = context,
+                    item = WatchHistory(
+                        id = movieId,
+                        title = d.title,
+                        type = mediaType,
+                        posterPath = d.posterPath,
+                        season = 1,
+                        episode = 1
+                    )
+                )
+                onPlayClick(movieId, mediaType, d.title, 1, 1, 0)
             }
-            // فتح السيرفرات
-            showServerSheet = true 
+            error -> Column(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("تعذّر تحميل التفاصيل", color = Color.White, fontSize = 16.sp)
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { reloadKey++ },
+                    colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Color.White)
+                ) { Text("إعادة المحاولة") }
+            }
+            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Pink)
+            }
         }
-    }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+        BackButton(onBack, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(12.dp))
+    }
+}
+
+@Composable
+private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.35f))
+            .border(1.dp, GlassStroke, CircleShape)
+            .clickable(onClick = onBack),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "رجوع", tint = Color.White)
+    }
+}
+
+@Composable
+private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val year = d.date?.take(4)?.takeIf { it.length == 4 }
+    val rating = d.rating?.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }
+    val overview = d.overview.ifBlank { "لا توجد قصة متاحة حالياً." }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Box(Modifier.fillMaxWidth()) {
+            AsyncImage(
+                model = img(d.backdropPath ?: d.posterPath, "w780"),
+                contentDescription = d.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(400.dp)
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = Brush.verticalGradient(0.5f to Color.Black, 1f to Color.Transparent),
+                            blendMode = BlendMode.DstIn
+                        )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
-        },
-        containerColor = Color(0xFF121212)
-    ) { paddingValues ->
-        if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color.Red)
-            }
-        } else if (movie != null) {
-            val backdropUrl = "https://image.tmdb.org/t/p/w780${movie?.backdropPath ?: movie?.posterPath}"
-            val title = movie?.title ?: movie?.name ?: "بدون عنوان"
+            Box(
+                Modifier.fillMaxWidth().height(120.dp).background(
+                    Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent))
+                )
+            )
 
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(paddingValues)
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 290.dp, bottom = 32.dp)
+                    .navigationBarsPadding(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(modifier = Modifier.height(300.dp)) {
-                    AsyncImage(
-                        model = backdropUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color(0xFF121212)),
-                                    startY = 400f
-                                )
-                            )
-                    )
-                }
+                Text(
+                    d.title,
+                    style = TextStyle(
+                        brush = Brush.verticalGradient(listOf(Color.White, Color(0xFFFFD9EF), Color(0xFFD7B6FF))),
+                        fontSize = 40.sp,
+                        lineHeight = 46.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.SansSerif,
+                        textAlign = TextAlign.Center,
+                        shadow = Shadow(Color.Black.copy(alpha = 0.75f), Offset(0f, 6f), 18f)
+                    ),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Box(
+                    Modifier
+                        .padding(top = 12.dp)
+                        .width(48.dp)
+                        .height(3.dp)
+                        .clip(CircleShape)
+                        .background(Brush.horizontalGradient(listOf(Purple, Pink)))
+                )
 
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("IMDb ${movie?.voteAverage?.toString()?.take(3) ?: "0.0"}", color = Color.Yellow, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text(movie?.releaseDate ?: movie?.firstAirDate ?: "", color = Color.Gray, fontSize = 14.sp)
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = movie?.overview ?: "لا يتوفر وصف.", color = Color.LightGray, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Button(
-                        onClick = {
-                            if (mediaType == "tv") {
-                                // إذا كان مسلسل، نفتح المواسم أولاً (إلا إذا كنا قادمين من متابعة المشاهدة)
-                                if (autoShowServers) {
-                                    showServerSheet = true
-                                } else {
-                                    showSeasonSheet = true
-                                }
-                            } else {
-                                // إذا كان فيلماً، نفتح السيرفرات مباشرة
-                                showServerSheet = true
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (autoShowServers) "متابعة المشاهدة" else "مشاهدة الآن", fontSize = 18.sp, color = Color.White)
-                    }
-                }
-            }
-
-            // نافذة المواسم والحلقات
-            if (showSeasonSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { showSeasonSheet = false },
-                    sheetState = sheetState,
-                    containerColor = Color(0xFF1E1E1E)
+                Row(
+                    Modifier.padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("اختر الموسم / الجزء:", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(movie?.seasons?.filter { it.seasonNumber > 0 } ?: emptyList()) { season ->
-                                Button(
-                                    onClick = { fetchEpisodes(season) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (selectedSeason?.seasonNumber == season.seasonNumber) Color.White else Color.DarkGray,
-                                        contentColor = if (selectedSeason?.seasonNumber == season.seasonNumber) Color.Black else Color.White
-                                    )
-                                ) {
-                                    Text(season.name ?: "الموسم ${season.seasonNumber}")
-                                }
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text("قائمة الحلقات (الموسم ${selectedSeason?.seasonNumber ?: 1}):", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        if (isLoadingEpisodes) {
-                            CircularProgressIndicator(color = Color.Red, modifier = Modifier.align(Alignment.CenterHorizontally))
-                        } else {
-                            LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                                items(episodes) { episode ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { 
-                                                selectedEpisodeNumber = episode.episodeNumber
-                                                showSeasonSheet = false
-                                                showServerSheet = true
-                                            }
-                                            .padding(vertical = 12.dp, horizontal = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text("الحلقة ${episode.episodeNumber}: ${episode.name}", color = Color.White, fontSize = 16.sp)
-                                    }
-                                    Divider(color = Color.DarkGray)
-                                }
-                            }
-                        }
-                    }
+                    rating?.let { MetaChip(it, Gold) }
+                    year?.let { MetaChip(it, Color.White) }
                 }
-            }
 
-            // نافذة السيرفرات
-            if (showServerSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { showServerSheet = false },
-                    sheetState = sheetState,
-                    containerColor = Color(0xFF1E1E1E)
+                Button(
+                    onClick = onPlay,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                    modifier = Modifier.padding(top = 20.dp).fillMaxWidth().height(52.dp)
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
-                        val headerText = if (mediaType == "tv") "الحلقة $selectedEpisodeNumber" else title
-                        Text(headerText, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("اختر السيرفر، إذا لم يعمل سيرفر جرب سيرفراً آخر.", color = Color.LightGray, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.height(24.dp))
+                    Icon(Icons.Outlined.PlayArrow, null)
+                    Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                }
 
-                        // دالة مساعدة للحفظ والتشغيل
-                        val onServerClick = { serverIndex: Int ->
-                            // 1. حفظ في السجل
-                            HistoryManager.addToHistory(
-                                context = context,
-                                item = WatchHistory(
-                                    id = movieId,
-                                    title = title,
-                                    type = mediaType,
-                                    posterPath = movie?.posterPath,
-                                    season = selectedSeason?.seasonNumber ?: 1,
-                                    episode = selectedEpisodeNumber
-                                )
-                            )
-                            // 2. الانتقال للمشغل
-                            onPlayClick(movieId, mediaType, title, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, serverIndex)
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = { onServerClick(0) },
-                                modifier = Modifier.weight(1f).height(60.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                shape = RoundedCornerShape(30.dp)
-                            ) { Text("Server 1", color = Color.Black, fontWeight = FontWeight.Bold) }
-                            
-                            Button(
-                                onClick = { onServerClick(1) },
-                                modifier = Modifier.weight(1f).height(60.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                shape = RoundedCornerShape(30.dp)
-                            ) { Text("Server 2", color = Color.Black, fontWeight = FontWeight.Bold) }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = { onServerClick(2) },
-                                modifier = Modifier.weight(1f).height(60.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                shape = RoundedCornerShape(30.dp)
-                            ) { Text("Server 3", color = Color.Black, fontWeight = FontWeight.Bold) }
-                            
-                            Button(
-                                onClick = { onServerClick(3) },
-                                modifier = Modifier.weight(1f).height(60.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                shape = RoundedCornerShape(30.dp)
-                            ) { Text("Server 4", color = Color.Black, fontWeight = FontWeight.Bold) }
-                        }
-                        Spacer(modifier = Modifier.height(24.dp))
+                val shape = RoundedCornerShape(16.dp)
+                Column(
+                    Modifier
+                        .padding(top = 22.dp)
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(GlassFill)
+                        .border(1.dp, GlassStroke, shape)
+                        .clickable { expanded = !expanded }
+                        .padding(16.dp)
+                ) {
+                    Text("القصة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        overview,
+                        color = Muted,
+                        fontSize = 15.sp,
+                        lineHeight = 24.sp,
+                        maxLines = if (expanded) Int.MAX_VALUE else 5,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (overview.length > 180) {
+                        Text(
+                            if (expanded) "عرض أقل" else "المزيد",
+                            color = Pink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MetaChip(text: String, color: Color) {
+    val shape = RoundedCornerShape(16.dp)
+    Box(
+        Modifier
+            .clip(shape)
+            .background(GlassFill)
+            .border(1.dp, GlassStroke, shape)
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+    ) {
+        Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -45,7 +46,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -77,6 +79,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -94,6 +97,8 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -124,11 +129,37 @@ private fun img(path: String?, size: String = "w500"): String? = path?.let { "$I
 /*  جلب البيانات                                                      */
 /* ------------------------------------------------------------------ */
 
-private suspend fun fetchTrending(): List<Movie> =
-    TMDBApi.create().getTrendingToday(API_KEY).results
+private data class HomeData(
+    val trending: List<Movie> = emptyList(),
+    val nowPlaying: List<Movie> = emptyList(),
+    val airing: List<Movie> = emptyList(),
+    val anime: List<Movie> = emptyList()
+)
+
+private suspend fun fetchHome(): HomeData = coroutineScope {
+    val api = TMDBApi.create()
+
+    suspend fun safe(type: String?, block: suspend () -> List<Movie>): List<Movie> = try {
+        block().map { if (type != null) it.copy(mediaType = type) else it }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    val trending = async { safe(null) { api.getTrendingToday(API_KEY).results } }
+    val nowPlaying = async { safe("movie") { api.getNowPlayingMovies(API_KEY).results } }
+    // ✅ تم إصلاح أسماء الدوال هنا لتتطابق مع TMDBApi.kt
+    val airing = async { safe("tv") { api.getAiringTodayTVShows(API_KEY).results } }
+    val anime = async { safe("tv") { api.getAnimeShows(API_KEY).results } }
+    HomeData(trending.await(), nowPlaying.await(), airing.await(), anime.await())
+}
 
 private suspend fun fetchSearch(query: String): List<Movie> =
     TMDBApi.create().searchMulti(API_KEY, query).results
+
+// WatchHistory لا يحمل نسبة التقدم؛ استبدلها بقيمتك الحقيقية (0f..1f)
+private fun progressOf(item: WatchHistory): Float = 0.4f
 
 /* ------------------------------------------------------------------ */
 /*  استخراج اللون السائد من البوستر                                      */
@@ -175,12 +206,13 @@ private fun HomeContent(
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
 
-    var trending by remember { mutableStateOf<List<Movie>>(emptyList()) }
+    var home by remember { mutableStateOf(HomeData()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    val history = remember { HistoryManager.getHistory(context) }
+    // ✅ ربطنا السجل بـ HistoryManager
+    val history = HistoryManager.getHistory(context)
 
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
@@ -194,7 +226,10 @@ private fun HomeContent(
         loading = true
         error = false
         try {
-            trending = fetchTrending()
+            home = fetchHome()
+            if (home.trending.isEmpty() && home.nowPlaying.isEmpty() &&
+                home.airing.isEmpty() && home.anime.isEmpty()
+            ) error = true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -221,11 +256,11 @@ private fun HomeContent(
         searching = false
     }
 
-    val filtered = remember(trending, chip) {
+    val filtered = remember(home, chip) {
         when (chip) {
-            "أفلام" -> trending.filter { it.mediaType == "movie" }
-            "مسلسلات" -> trending.filter { it.mediaType == "tv" }
-            else -> trending
+            "أفلام" -> home.trending.filter { it.mediaType == "movie" }
+            "مسلسلات" -> home.trending.filter { it.mediaType == "tv" }
+            else -> home.trending
         }.filter { it.posterPath != null }
     }
     val heroes = filtered.take(5)
@@ -281,6 +316,9 @@ private fun HomeContent(
                 else -> HomeFeed(
                     heroes = heroes,
                     rest = rest,
+                    nowPlaying = home.nowPlaying,
+                    airing = home.airing,
+                    anime = home.anime,
                     history = history,
                     chip = chip,
                     pagerState = pagerState,
@@ -294,8 +332,10 @@ private fun HomeContent(
         BottomNav(
             selected = tab,
             onSelect = { i ->
-                tab = i
-                if (i == 1) focusRequester.requestFocus()
+                if (i != 2) { 
+                    tab = i
+                    if (i == 1) focusRequester.requestFocus()
+                }
             },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
@@ -381,6 +421,9 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
 private fun HomeFeed(
     heroes: List<Movie>,
     rest: List<Movie>,
+    nowPlaying: List<Movie>,
+    airing: List<Movie>,
+    anime: List<Movie>,
     history: List<WatchHistory>,
     chip: String?,
     pagerState: PagerState,
@@ -430,17 +473,24 @@ private fun HomeFeed(
             }
         }
 
-        if (rest.isNotEmpty()) {
-            item { SectionTitle("التريند الآن") }
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(rest, key = { "${it.mediaType}-${it.id}" }) { m ->
-                        PosterCard(m, Modifier.width(120.dp)) { onMovieClick(m) }
-                    }
-                }
+        movieRow("الترند الآن", rest, onMovieClick)
+        movieRow("وصل حديثاً للسينما", nowPlaying, onMovieClick)
+        movieRow("جديد المسلسلات", airing, onMovieClick)
+        movieRow("عالم الأنمي", anime, onMovieClick)
+    }
+}
+
+private fun LazyListScope.movieRow(title: String, list: List<Movie>, onClick: (Movie) -> Unit) {
+    val visible = list.filter { it.posterPath != null }
+    if (visible.isEmpty()) return
+    item { SectionTitle(title) }
+    item {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(visible, key = { "${it.mediaType}-${it.id}" }) { m ->
+                PosterCard(m, Modifier.width(120.dp)) { onClick(m) }
             }
         }
     }
@@ -523,16 +573,30 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, modifier: Modifier = Mod
             Modifier.align(Alignment.BottomCenter).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // نص يحاكي الشعار
             Text(
                 movie.displayTitle(),
-                color = Color.White,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = TextAlign.Center,
+                style = TextStyle(
+                    brush = Brush.verticalGradient(listOf(Color.White, Color(0xFFFFD9EF), Color(0xFFD7B6FF))),
+                    fontSize = 36.sp,
+                    lineHeight = 42.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.SansSerif,
+                    textAlign = TextAlign.Center,
+                    shadow = Shadow(Color.Black.copy(alpha = 0.75f), Offset(0f, 6f), 18f)
+                ),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(tags, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, bottom = 14.dp))
+            Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .width(44.dp)
+                    .height(3.dp)
+                    .clip(CircleShape)
+                    .background(Brush.horizontalGradient(listOf(Purple, Pink)))
+            )
+            Text(tags, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onClick,
@@ -640,7 +704,7 @@ private fun ContinueCard(item: WatchHistory, onClick: () -> Unit) {
             Box(
                 Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(0.4f)
+                    .fillMaxWidth(progressOf(item).coerceIn(0f, 1f))
                     .background(Brush.horizontalGradient(listOf(Purple, Pink)))
             )
         }
@@ -706,7 +770,7 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier
     val items = listOf(
         "الرئيسية" to Icons.Outlined.Home,
         "بحث" to Icons.Outlined.Search,
-        "مقاطع" to Icons.Outlined.VideoLibrary,
+        "ادعمنا" to Icons.Outlined.FavoriteBorder,
         "حسابي" to Icons.Outlined.Person
     )
     val shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
