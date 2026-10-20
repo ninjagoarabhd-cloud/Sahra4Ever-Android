@@ -75,7 +75,6 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
-// التصنيفات العلوية (لم نغيرها كما طلبت)
 private val CHIPS = listOf("أفلام", "مسلسلات", "أكشن وحركة", "دراما", "خيال علمي", "كوميدي", "مغامرة", "رعب")
 
 private fun Movie.displayTitle(): String = title ?: name ?: ""
@@ -90,14 +89,15 @@ private data class HomeData(
 
 private suspend fun fetchHome(): HomeData = coroutineScope {
     val api = TMDBApi.create()
+    // نستخدم en-US لضمان البوسترات الإنجليزية
     suspend fun safe(type: String?, block: suspend () -> List<Movie>): List<Movie> = try {
         block().map { if (type != null) it.copy(mediaType = type) else it }
     } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
 
-    val trending = async { safe(null) { api.getTrendingToday(API_KEY).results } }
-    val nowPlaying = async { safe("movie") { api.getNowPlayingMovies(API_KEY).results } }
-    val airing = async { safe("tv") { api.getAiringTodayTVShows(API_KEY).results } }
-    val anime = async { safe("tv") { api.getAnimeShows(API_KEY).results } }
+    val trending = async { safe(null) { api.getTrendingToday(API_KEY, "en-US").results } }
+    val nowPlaying = async { safe("movie") { api.getNowPlayingMovies(API_KEY, "en-US").results } }
+    val airing = async { safe("tv") { api.getAiringTodayTVShows(API_KEY, "en-US").results } }
+    val anime = async { safe("tv") { api.getAnimeShows(API_KEY, "en-US").results } }
     HomeData(trending.await(), nowPlaying.await(), airing.await(), anime.await())
 }
 
@@ -120,8 +120,8 @@ private suspend fun extractColor(context: Context, url: String?): Color? {
 fun HomeScreen(
     onMovieClick: (Int, String, String) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
-    onCategoryClick: (String) -> Unit, // ✅ جديد: لربط التصنيفات بصفحة البحث
-    onSearchClick: () -> Unit // ✅ جديد: لربط زر البحث السفلي
+    onCategoryClick: (String) -> Unit,
+    onSearchClick: () -> Unit
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         HomeContent(onMovieClick, onContinueWatchingClick, onCategoryClick, onSearchClick)
@@ -159,7 +159,7 @@ private fun HomeContent(
     LaunchedEffect(query) {
         if (query.isBlank()) { results = emptyList(); searching = false; return@LaunchedEffect }
         searching = true; delay(400)
-        try { results = TMDBApi.create().searchMulti(API_KEY, query.trim()).results.filter { it.mediaType != "person" && it.posterPath != null } } catch (e: Exception) { results = emptyList() }
+        try { results = TMDBApi.create().searchMulti(API_KEY, query.trim(), 1, "en-US").results.filter { it.mediaType != "person" && it.posterPath != null } } catch (e: Exception) { results = emptyList() }
         searching = false
     }
 
@@ -199,9 +199,7 @@ private fun HomeContent(
                 }
                 else -> HomeFeed(
                     heroes = heroes, rest = rest, nowPlaying = home.nowPlaying, airing = home.airing, anime = home.anime, history = history, chip = chip, pagerState = pagerState, 
-                    onChip = { c -> 
-                        onCategoryClick(c) // ✅ فتح صفحة البحث عند الضغط على تصنيف
-                    }, 
+                    onChip = { c -> onCategoryClick(c) }, 
                     onMovieClick = movieClick, onContinue = onContinueWatchingClick
                 )
             }
@@ -211,7 +209,7 @@ private fun HomeContent(
             selected = tab,
             onSelect = { i ->
                 tab = i
-                if (i == 1) onSearchClick() // ✅ فتح صفحة البحث عند الضغط على أيقونة البحث
+                if (i == 1) onSearchClick() 
                 if (i == 0) focusRequester.requestFocus()
             },
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -317,6 +315,7 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, modifier: Modifier = Mod
         AsyncImage(model = img(movie.posterPath, "w780") ?: img(movie.backdropPath, "w780"), contentDescription = movie.displayTitle(), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))))
         Column(Modifier.align(Alignment.BottomCenter).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // النص الإنجليزي كشعار
             Text(movie.displayTitle(), style = TextStyle(brush = Brush.verticalGradient(listOf(Color.White, Color(0xFFFFD9EF), Color(0xFFD7B6FF))), fontSize = 36.sp, lineHeight = 42.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.SansSerif, textAlign = TextAlign.Center, shadow = Shadow(Color.Black.copy(alpha = 0.75f), Offset(0f, 6f), 18f)), maxLines = 2, overflow = TextOverflow.Ellipsis)
             Box(Modifier.padding(top = 10.dp).width(44.dp).height(3.dp).clip(CircleShape).background(Brush.horizontalGradient(listOf(Purple, Pink))))
             Text(tags, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 14.dp))

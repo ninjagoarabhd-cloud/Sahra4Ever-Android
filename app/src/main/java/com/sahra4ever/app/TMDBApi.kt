@@ -7,80 +7,67 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface TMDBApi {
-    // 1. البانر الرئيسي (تريند الأسبوع)
     @GET("trending/all/week")
-    suspend fun getTrendingWeek(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getTrendingWeek(@Query("api_key") apiKey: String, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 2. التريند الآن (تريند اليوم)
     @GET("trending/all/day")
-    suspend fun getTrendingToday(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getTrendingToday(@Query("api_key") apiKey: String, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 3. وصل حديثاً للسينما
     @GET("movie/now_playing")
-    suspend fun getNowPlayingMovies(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getNowPlayingMovies(@Query("api_key") apiKey: String, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 4. جديد المسلسلات (تعرض اليوم)
     @GET("tv/airing_today")
-    suspend fun getAiringTodayTVShows(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getAiringTodayTVShows(@Query("api_key") apiKey: String, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 5. عالم الأنمي
     @GET("discover/tv?with_genres=16&with_original_language=ja&sort_by=popularity.desc&vote_count.gte=300")
-    suspend fun getAnimeShows(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getAnimeShows(@Query("api_key") apiKey: String, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 6. البحث الشامل
+    // البحث مع ترقيم الصفحات
     @GET("search/multi")
     suspend fun searchMulti(
         @Query("api_key") apiKey: String,
         @Query("query") query: String,
-        @Query("language") language: String = "ar-SA"
+        @Query("page") page: Int = 1,
+        @Query("language") language: String = "en-US"
     ): MovieResponse
 
-    // 7. الأفلام الشائعة (لصفحة البحث)
+    // الأفلام الأعلى تقييماً حسب التصنيف
+    @GET("discover/movie")
+    suspend fun getTopRatedMoviesByGenre(
+        @Query("api_key") apiKey: String,
+        @Query("with_genres") genreId: String,
+        @Query("sort_by") sortBy: String = "vote_average.desc",
+        @Query("vote_count.gte") voteCount: Int = 200,
+        @Query("page") page: Int = 1,
+        @Query("language") language: String = "en-US"
+    ): MovieResponse
+
+    // المسلسلات الأعلى تقييماً حسب التصنيف
+    @GET("discover/tv")
+    suspend fun getTopRatedTvByGenre(
+        @Query("api_key") apiKey: String,
+        @Query("with_genres") genreId: String,
+        @Query("sort_by") sortBy: String = "vote_average.desc",
+        @Query("vote_count.gte") voteCount: Int = 200,
+        @Query("page") page: Int = 1,
+        @Query("language") language: String = "en-US"
+    ): MovieResponse
+
+    // الأفلام الشائعة (لزر "أفلام" في البحث)
     @GET("movie/popular")
-    suspend fun getPopularMovies(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getPopularMovies(@Query("api_key") apiKey: String, @Query("page") page: Int = 1, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 8. المسلسلات الشائعة (لصفحة البحث)
+    // المسلسلات الشائعة (لزر "مسلسلات" في البحث)
     @GET("tv/popular")
-    suspend fun getPopularTvShows(
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): MovieResponse
+    suspend fun getPopularTvShows(@Query("api_key") apiKey: String, @Query("page") page: Int = 1, @Query("language") language: String = "en-US"): MovieResponse
 
-    // 9. تفاصيل فيلم
+    // التفاصيل: نقبل اللغة كمتغير لكي نجلب العربي أولاً ثم الإنجليزي إذا لزم
     @GET("movie/{id}")
-    suspend fun getMovieDetails(
-        @Path("id") id: Int,
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): Movie
+    suspend fun getMovieDetails(@Path("id") id: Int, @Query("api_key") apiKey: String, @Query("language") language: String = "ar-SA"): Movie
 
-    // 10. تفاصيل مسلسل
     @GET("tv/{id}")
-    suspend fun getTvDetails(
-        @Path("id") id: Int,
-        @Query("api_key") apiKey: String,
-        @Query("language") language: String = "ar-SA"
-    ): Movie
+    suspend fun getTvDetails(@Path("id") id: Int, @Query("api_key") apiKey: String, @Query("language") language: String = "ar-SA"): Movie
 
-    // 11. حلقات الموسم
     @GET("tv/{id}/season/{season_number}")
     suspend fun getTvSeason(
         @Path("id") id: Int,

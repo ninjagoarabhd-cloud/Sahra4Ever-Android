@@ -79,28 +79,41 @@ private data class DetailsUi(
 
 private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
     val api = TMDBApi.create()
-    return if (mediaType == "tv") {
-        val d = api.getTvDetails(id, API_KEY)
-        DetailsUi(
-            title = d.name ?: "",
-            overview = d.overview ?: "",
-            backdropPath = d.backdropPath,
-            posterPath = d.posterPath,
-            rating = d.voteAverage,
-            date = d.firstAirDate,
+    var title = ""
+    var overview = ""
+    var backdrop: String? = null
+    var poster: String? = null
+    var rating: Double? = null
+    var date: String? = null
+    var seasons: List<Season>? = null
+
+    try {
+        if (mediaType == "tv") {
+            var d = api.getTvDetails(id, API_KEY, "ar-SA")
+            // إذا كانت القصة فارغة، نجلبها بالإنجليزية
+            if (d.overview.isNullOrBlank()) d = api.getTvDetails(id, API_KEY, "en-US")
+            title = d.name ?: ""
+            overview = d.overview ?: ""
+            backdrop = d.backdropPath
+            poster = d.posterPath
+            rating = d.voteAverage
+            date = d.firstAirDate
             seasons = d.seasons
-        )
-    } else {
-        val d = api.getMovieDetails(id, API_KEY)
-        DetailsUi(
-            title = d.title ?: "",
-            overview = d.overview ?: "",
-            backdropPath = d.backdropPath,
-            posterPath = d.posterPath,
-            rating = d.voteAverage,
+        } else {
+            var d = api.getMovieDetails(id, API_KEY, "ar-SA")
+            if (d.overview.isNullOrBlank()) d = api.getMovieDetails(id, API_KEY, "en-US")
+            title = d.title ?: ""
+            overview = d.overview ?: ""
+            backdrop = d.backdropPath
+            poster = d.posterPath
+            rating = d.voteAverage
             date = d.releaseDate
-        )
-    }
+        }
+    } catch (e: Exception) { }
+
+    if (overview.isBlank()) overview = "لا توجد قصة متاحة حالياً."
+
+    return DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
 }
 
 private suspend fun extractColor(context: Context, url: String?): Color? {
@@ -214,7 +227,7 @@ fun DetailsScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("تعذّر تحميل التفاصيل", color = Color.White, fontSize = 16.sp)
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = { reloadKey++ },
                         colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Color.White)
@@ -439,7 +452,7 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                         .padding(16.dp)
                 ) {
                     Text("القصة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         overview,
                         color = Muted,

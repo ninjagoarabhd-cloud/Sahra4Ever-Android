@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -32,17 +33,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private const val API_KEY = "26097366152d7131fde0f53b80ee37de"
 private val Pink = Color(0xFFFF2FA6)
-private val Purple = Color(0xFF7B2CFF)
 private val Ink = Color(0xFF0F0E14)
-private val GlassFill = Color.White.copy(alpha = 0.12f)
-private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
 private fun img(path: String?, size: String = "w342"): String? = path?.let { "https://image.tmdb.org/t/p/$size$it" }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     initialCategory: String,
@@ -50,35 +50,57 @@ fun SearchScreen(
     onMovieClick: (Int, String, String) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
+    val scope = rememberCoroutineScope()
+    
     var query by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(initialCategory) }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(false) }
+    
+    // حالة التمرير (Pagination)
+    var page by remember { mutableIntStateOf(1) }
+    var isLastPage by remember { mutableStateOf(false) }
+    var isLoadingMore by remember { mutableStateOf(false) }
 
     val categories = listOf("الكل", "أفلام", "مسلسلات", "أكشن", "دراما", "خيال علمي", "كوميدي", "رعب")
 
-    // جلب البيانات بناءً على التصنيف أو البحث
-    LaunchedEffect(query, selectedCategory) {
-        isLoading = true
-        delay(300) // Debounce
+    // دالة جلب البيانات
+    suspend fun fetchData(isLoadMore: Boolean = false) {
+        if (isLoadMore) isLoadingMore = true else { isLoading = true; page = 1; isLastPage = false }
+        
         try {
             val api = TMDBApi.create()
-            if (query.isNotBlank()) {
-                results = api.searchMulti(API_KEY, query).results.filter { it.mediaType == "movie" || it.mediaType == "tv" }
+            // نستخدم en-US لضمان البوسترات الإنجليزية
+            val response = if (query.isNotBlank()) {
+                api.searchMulti(API_KEY, query, page, "en-US")
             } else {
-                results = when (selectedCategory) {
-                    "أفلام" -> api.getPopularMovies(API_KEY).results.map { it.copy(mediaType = "movie") }
-                    "مسلسلات" -> api.getPopularTvShows(API_KEY).results.map { it.copy(mediaType = "tv") }
-                    else -> {
-                        // للتبسيط، "الكل" أو التصنيفات الفرعية ستجلب التريند حالياً
-                        api.getTrendingToday(API_KEY).results
-                    }
+                when (selectedCategory) {
+                    "أفلام" -> api.getPopularMovies(API_KEY, page, "en-US")
+                    "مسلسلات" -> api.getPopularTvShows(API_KEY, page, "en-US")
+                    "أكشن" -> api.getTopRatedMoviesByGenre(API_KEY, "28", page = page, language = "en-US")
+                    "دراما" -> api.getTopRatedMoviesByGenre(API_KEY, "18", page = page, language = "en-US")
+                    "خيال علمي" -> api.getTopRatedMoviesByGenre(API_KEY, "878", page = page, language = "en-US")
+                    "كوميدي" -> api.getTopRatedMoviesByGenre(API_KEY, "35", page = page, language = "en-US")
+                    "رعب" -> api.getTopRatedMoviesByGenre(API_KEY, "27", page = page, language = "en-US")
+                    else -> api.getTrendingToday(API_KEY, "en-US") 
                 }
             }
+            
+            val newResults = response.results.filter { it.posterPath != null }
+            if (isLoadMore) results = results + newResults else results = newResults
+            isLastPage = response.results.isEmpty() || page >= 10 // نكتفي بـ 10 صفحات (200 نتيجة) كحد أقصى
+            
         } catch (e: Exception) {
-            results = emptyList()
+            if (!isLoadMore) results = emptyList()
+        } finally {
+            isLoading = false
+            isLoadingMore = false
         }
-        isLoading = false
+    }
+
+    LaunchedEffect(query, selectedCategory) {
+        delay(400) // Debounce
+        fetchData(false)
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Ink)) {
@@ -100,7 +122,7 @@ fun SearchScreen(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                placeholder = { Text("ابحث بالاسم، الممثل، التصنيف، أو السنة...", color = Muted) },
+                placeholder = { Text("ابحث بالاسم، الممثل، التصنيف...", color = Muted) },
                 leadingIcon = { Icon(Icons.Outlined.Search, null, tint = Pink) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -114,13 +136,9 @@ fun SearchScreen(
                 keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                 shape = RoundedCornerShape(12.dp),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF1E1E1E),
-                    unfocusedContainerColor = Color(0xFF1E1E1E),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = Pink,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    focusedContainerColor = Color(0xFF1E1E1E), unfocusedContainerColor = Color(0xFF1E1E1E),
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                    cursorColor = Pink, focusedTextColor = Color.White, unfocusedTextColor = Color.White
                 ),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(60.dp)
             )
@@ -164,19 +182,40 @@ fun SearchScreen(
             } else {
                 Text(
                     "جميع النتائج (${results.size})",
-                    color = Muted,
-                    fontSize = 14.sp,
+                    color = Muted, fontSize = 14.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    items(results, key = { it.id }) { movie ->
+                    items(results, key = { "${it.id}-${it.mediaType}" }) { movie ->
                         SearchMovieCard(movie) {
                             onMovieClick(movie.id, movie.mediaType ?: "movie", movie.title ?: movie.name ?: "")
+                        }
+                    }
+                    
+                    // زر تحميل المزيد
+                    if (!isLastPage) {
+                        item {
+                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                if (isLoadingMore) {
+                                    CircularProgressIndicator(color = Pink, modifier = Modifier.size(24.dp))
+                                } else {
+                                    Button(
+                                        onClick = { 
+                                            page++
+                                            scope.launch { fetchData(isLoadMore = true) }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+                                    ) {
+                                        Text("تحميل المزيد")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -195,25 +234,18 @@ fun SearchMovieCard(movie: Movie, onClick: () -> Unit) {
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
-            model = img(movie.posterPath),
+            model = img(movie.posterPath), // صورة إنجليزية
             contentDescription = movie.title,
             modifier = Modifier.fillMaxSize(),
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            contentScale = ContentScale.Crop
         )
         
-        // تدرج لوني في الأسفل لقراءة النص
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.6f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.9f)
-                    )
-                )
+            modifier = Modifier.fillMaxSize().background(
+                Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))
+            )
         )
         
-        // التقييم (نجمة)
         Row(
             modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
                 .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
@@ -222,33 +254,21 @@ fun SearchMovieCard(movie: Movie, onClick: () -> Unit) {
         ) {
             Text("★", color = Color.Yellow, fontSize = 12.sp)
             Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = String.format(java.util.Locale.US, "%.1f", movie.voteAverage ?: 0.0),
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(String.format(java.util.Locale.US, "%.1f", movie.voteAverage ?: 0.0), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
 
-        // النوع (فيلم / مسلسل)
         Text(
             text = if (movie.mediaType == "tv") "مسلسل" else "فيلم",
-            color = Color.White,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
+            color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-                .background(Pink, RoundedCornerShape(4.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .background(Pink, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
         )
 
-        // العنوان
+        // عرض الاسم الإنجليزي
         Text(
             text = movie.title ?: movie.name ?: "",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black,
+            maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.align(Alignment.BottomStart).padding(12.dp)
         )
     }
