@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.ExperimentalFoundationApi // ✅ تم إضافة الاستيراد
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,16 +70,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Offset // ✅ تم إضافة الاستيراد
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow // ✅ تم إضافة الاستيراد
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.text.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -105,10 +105,6 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.absoluteValue
 
-/* ------------------------------------------------------------------ */
-/*  الثوابت والألوان                                                    */
-/* ------------------------------------------------------------------ */
-
 private const val API_KEY = "26097366152d7131fde0f53b80ee37de"
 private const val IMG = "https://image.tmdb.org/t/p/"
 
@@ -124,10 +120,6 @@ private val CHIPS = listOf("أفلام", "مسلسلات", "أكشن وحركة"
 
 private fun Movie.displayTitle(): String = title ?: name ?: ""
 private fun img(path: String?, size: String = "w500"): String? = path?.let { "$IMG$size$it" }
-
-/* ------------------------------------------------------------------ */
-/*  جلب البيانات                                                      */
-/* ------------------------------------------------------------------ */
 
 private data class HomeData(
     val trending: List<Movie> = emptyList(),
@@ -149,7 +141,6 @@ private suspend fun fetchHome(): HomeData = coroutineScope {
 
     val trending = async { safe(null) { api.getTrendingToday(API_KEY).results } }
     val nowPlaying = async { safe("movie") { api.getNowPlayingMovies(API_KEY).results } }
-    // ✅ تم إصلاح أسماء الدوال هنا لتتطابق مع TMDBApi.kt
     val airing = async { safe("tv") { api.getAiringTodayTVShows(API_KEY).results } }
     val anime = async { safe("tv") { api.getAnimeShows(API_KEY).results } }
     HomeData(trending.await(), nowPlaying.await(), airing.await(), anime.await())
@@ -158,12 +149,7 @@ private suspend fun fetchHome(): HomeData = coroutineScope {
 private suspend fun fetchSearch(query: String): List<Movie> =
     TMDBApi.create().searchMulti(API_KEY, query).results
 
-// WatchHistory لا يحمل نسبة التقدم؛ استبدلها بقيمتك الحقيقية (0f..1f)
 private fun progressOf(item: WatchHistory): Float = 0.4f
-
-/* ------------------------------------------------------------------ */
-/*  استخراج اللون السائد من البوستر                                      */
-/* ------------------------------------------------------------------ */
 
 private suspend fun extractColor(context: Context, url: String?): Color? {
     if (url == null) return null
@@ -183,10 +169,6 @@ private suspend fun extractColor(context: Context, url: String?): Color? {
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  الشاشة الرئيسية                                                      */
-/* ------------------------------------------------------------------ */
-
 @Composable
 fun HomeScreen(
     onMovieClick: (Int, String, String) -> Unit,
@@ -197,7 +179,7 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class) // ✅ تم إضافة الإذن هنا
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeContent(
     onMovieClick: (Int, String, String) -> Unit,
@@ -211,7 +193,6 @@ private fun HomeContent(
     var error by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    // ✅ ربطنا السجل بـ HistoryManager
     val history = HistoryManager.getHistory(context)
 
     var query by remember { mutableStateOf("") }
@@ -332,7 +313,7 @@ private fun HomeContent(
         BottomNav(
             selected = tab,
             onSelect = { i ->
-                if (i != 2) { 
+                if (i != 2) {
                     tab = i
                     if (i == 1) focusRequester.requestFocus()
                 }
@@ -341,10 +322,6 @@ private fun HomeContent(
         )
     }
 }
-
-/* ------------------------------------------------------------------ */
-/*  الشريط العلوي                                                        */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun Header() {
@@ -370,10 +347,6 @@ private fun Header() {
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
-/*  شريط البحث                                                           */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester: FocusRequester) {
@@ -412,11 +385,7 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
     )
 }
 
-/* ------------------------------------------------------------------ */
-/*  المحتوى الرئيسي                                                      */
-/* ------------------------------------------------------------------ */
-
-@OptIn(ExperimentalFoundationApi::class) // ✅ تم إضافة الإذن هنا أيضاً
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeFeed(
     heroes: List<Movie>,
@@ -507,10 +476,6 @@ private fun SectionTitle(text: String) {
     )
 }
 
-/* ------------------------------------------------------------------ */
-/*  التصنيفات (Glass chips)                                              */
-/* ------------------------------------------------------------------ */
-
 @Composable
 private fun Chips(selected: String?, onSelect: (String?) -> Unit) {
     LazyRow(
@@ -533,10 +498,6 @@ private fun Chips(selected: String?, onSelect: (String?) -> Unit) {
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
-/*  بطاقة السلايدر                                                       */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun HeroCard(movie: Movie, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -573,7 +534,6 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, modifier: Modifier = Mod
             Modifier.align(Alignment.BottomCenter).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // نص يحاكي الشعار
             Text(
                 movie.displayTitle(),
                 style = TextStyle(
@@ -645,10 +605,6 @@ private fun Dots(count: Int, current: Int) {
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  متابعة المشاهدة                                                      */
-/* ------------------------------------------------------------------ */
-
 @Composable
 private fun ContinueCard(item: WatchHistory, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
@@ -711,10 +667,6 @@ private fun ContinueCard(item: WatchHistory, onClick: () -> Unit) {
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  بطاقة بوستر + نتائج البحث                                            */
-/* ------------------------------------------------------------------ */
-
 @Composable
 private fun PosterCard(movie: Movie, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Column(modifier.clickable(onClick = onClick)) {
@@ -760,10 +712,6 @@ private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
-/*  شريط التنقل السفلي (Dark glass)                                     */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {

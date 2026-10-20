@@ -43,17 +43,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Offset // ✅ تم إضافة الاستيراد
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Shadow // ✅ تم إضافة الاستيراد
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.text.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -140,14 +140,18 @@ private suspend fun extractColor(context: Context, url: String?): Color? {
 }
 
 @Composable
+// ✅ تم إضافة المتغيرات المطلوبة هنا
 fun DetailsScreen(
     movieId: Int,
     mediaType: String,
+    initialSeason: Int = 1,
+    initialEpisode: Int = 1,
+    autoShowServers: Boolean = false,
     onBack: () -> Unit,
     onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        DetailsContent(movieId, mediaType, onBack, onPlayClick)
+        DetailsContent(movieId, mediaType, initialSeason, initialEpisode, autoShowServers, onBack, onPlayClick)
     }
 }
 
@@ -155,6 +159,9 @@ fun DetailsScreen(
 private fun DetailsContent(
     movieId: Int,
     mediaType: String,
+    initialSeason: Int,
+    initialEpisode: Int,
+    autoShowServers: Boolean,
     onBack: () -> Unit,
     onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
 ) {
@@ -192,7 +199,7 @@ private fun DetailsContent(
         val d = ui
         when {
             d != null -> DetailsBody(d) {
-                // ✅ إضافة العمل إلى "متابعة المشاهدة" قبل فتح المشغل
+                // حفظ في السجل
                 HistoryManager.addToHistory(
                     context = context,
                     item = WatchHistory(
@@ -200,11 +207,12 @@ private fun DetailsContent(
                         title = d.title,
                         type = mediaType,
                         posterPath = d.posterPath,
-                        season = 1,
-                        episode = 1
+                        season = initialSeason,
+                        episode = initialEpisode
                     )
                 )
-                onPlayClick(movieId, mediaType, d.title, 1, 1, 0)
+                // التشغيل بالبيانات الصحيحة
+                onPlayClick(movieId, mediaType, d.title, initialSeason, initialEpisode, 0)
             }
             error -> Column(
                 Modifier.fillMaxSize(),
