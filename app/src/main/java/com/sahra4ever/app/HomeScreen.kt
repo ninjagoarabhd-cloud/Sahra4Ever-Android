@@ -5,6 +5,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image // ✅ إضافة Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource // ✅ إضافة painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -220,7 +222,12 @@ private fun HomeContent(
 @Composable
 private fun Header() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text("Sahra4Ever", style = TextStyle(brush = Brush.horizontalGradient(listOf(Purple, Pink)), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.SansSerif, letterSpacing = (-0.5).sp))
+        // ✅ تم استبدال النص بصورة الشعار
+        Image(
+            painter = painterResource(id = R.drawable.logo),
+            contentDescription = "Sahra4Ever Logo",
+            modifier = Modifier.height(40.dp)
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
             Icon(Icons.Outlined.Cast, "بث", tint = Color.White, modifier = Modifier.height(24.dp))
             Icon(Icons.Outlined.Download, "تحميل", tint = Color.White, modifier = Modifier.height(24.dp))

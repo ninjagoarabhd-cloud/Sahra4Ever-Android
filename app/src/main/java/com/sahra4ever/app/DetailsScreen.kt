@@ -35,7 +35,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font // ✅ إضافة Font
+import androidx.compose.ui.text.font.FontFamily // ✅ إضافة FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +66,10 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
+// ✅ تعريف الخطوط
+val CairoBold = FontFamily(Font(R.font.cairo_bold, FontWeight.Bold))
+val CairoLight = FontFamily(Font(R.font.cairo_light, FontWeight.Light))
+
 private fun img(path: String?, size: String = "w500"): String? = path?.let { "$IMG$size$it" }
 
 private data class DetailsUi(
@@ -89,9 +94,8 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
 
     try {
         if (mediaType == "tv") {
-            var d = api.getTvDetails(id, API_KEY, "ar-SA")
-            // إذا كانت القصة فارغة، نجلبها بالإنجليزية
-            if (d.overview.isNullOrBlank()) d = api.getTvDetails(id, API_KEY, "en-US")
+            // ✅ نجلب بالعربية فقط
+            val d = api.getTvDetails(id, API_KEY, "ar-SA") 
             title = d.name ?: ""
             overview = d.overview ?: ""
             backdrop = d.backdropPath
@@ -100,8 +104,8 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
             date = d.firstAirDate
             seasons = d.seasons
         } else {
-            var d = api.getMovieDetails(id, API_KEY, "ar-SA")
-            if (d.overview.isNullOrBlank()) d = api.getMovieDetails(id, API_KEY, "en-US")
+            // ✅ نجلب بالعربية فقط
+            val d = api.getMovieDetails(id, API_KEY, "ar-SA") 
             title = d.title ?: ""
             overview = d.overview ?: ""
             backdrop = d.backdropPath
@@ -111,6 +115,7 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
         }
     } catch (e: Exception) { }
 
+    // إذا كانت القصة فارغة، نضع رسالة افتراضية
     if (overview.isBlank()) overview = "لا توجد قصة متاحة حالياً."
 
     return DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
@@ -399,14 +404,15 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                     .navigationBarsPadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // ✅ اسم العمل بخط CairoBold
                 Text(
                     d.title,
                     style = TextStyle(
                         brush = Brush.verticalGradient(listOf(Color.White, Color(0xFFFFD9EF), Color(0xFFD7B6FF))),
                         fontSize = 40.sp,
                         lineHeight = 46.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.SansSerif,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = CairoBold, // ✅ الخط الجديد
                         textAlign = TextAlign.Center,
                         shadow = Shadow(Color.Black.copy(alpha = 0.75f), Offset(0f, 6f), 18f)
                     ),
@@ -453,11 +459,15 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                 ) {
                     Text("القصة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
+                    // ✅ القصة بخط CairoLight
                     Text(
                         overview,
-                        color = Muted,
-                        fontSize = 15.sp,
-                        lineHeight = 24.sp,
+                        style = TextStyle(
+                            color = Muted,
+                            fontSize = 15.sp,
+                            lineHeight = 24.sp,
+                            fontFamily = CairoLight // ✅ الخط الجديد
+                        ),
                         maxLines = if (expanded) Int.MAX_VALUE else 5,
                         overflow = TextOverflow.Ellipsis
                     )
