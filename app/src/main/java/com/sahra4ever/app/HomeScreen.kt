@@ -4,7 +4,7 @@ import android.util.LruCache
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ExperimentalFoundationApi // ✅
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,7 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyListState // ✅ إضافة
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -30,7 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.Immutable // ✅ إضافة
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
@@ -72,7 +71,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.IOException // ✅ إضافة
+import java.io.IOException
 import java.util.Locale
 import kotlin.math.absoluteValue
 
@@ -164,7 +163,7 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class, FlowPreview::class)
+@OptIn(ExperimentalFoundationApi::class, FlowPreview::class) // ✅ الإذن موجود هنا
 @Composable
 private fun HomeContent(
     onMovieClick: (Int, String, String) -> Unit,
@@ -336,7 +335,7 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class) // ✅ الإذن موجود هنا
 @Composable
 private fun HomeFeed(
     heroes: List<Movie>, rest: List<Movie>, nowPlaying: List<Movie>, airing: List<Movie>, anime: List<Movie>,
@@ -447,7 +446,7 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifi
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class) // ✅ الإذن موجود هنا
 @Composable
 private fun Dots(count: Int, pagerState: PagerState) {
     val current = pagerState.currentPage
@@ -485,6 +484,7 @@ private fun PosterCard(movie: Movie, modifier: Modifier = Modifier, onClick: () 
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class) // ✅ الإذن موجود هنا
 @Composable
 private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick: (Movie) -> Unit) {
     Box(Modifier.fillMaxSize()) {
