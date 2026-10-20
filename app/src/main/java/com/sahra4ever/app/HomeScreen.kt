@@ -5,7 +5,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image // ✅ إضافة Image
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,7 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.painterResource // ✅ إضافة painterResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -91,7 +91,6 @@ private data class HomeData(
 
 private suspend fun fetchHome(): HomeData = coroutineScope {
     val api = TMDBApi.create()
-    // نستخدم en-US لضمان البوسترات الإنجليزية
     suspend fun safe(type: String?, block: suspend () -> List<Movie>): List<Movie> = try {
         block().map { if (type != null) it.copy(mediaType = type) else it }
     } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
@@ -222,7 +221,6 @@ private fun HomeContent(
 @Composable
 private fun Header() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        // ✅ تم استبدال النص بصورة الشعار
         Image(
             painter = painterResource(id = R.drawable.logo),
             contentDescription = "Sahra4Ever Logo",
@@ -322,7 +320,6 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, modifier: Modifier = Mod
         AsyncImage(model = img(movie.posterPath, "w780") ?: img(movie.backdropPath, "w780"), contentDescription = movie.displayTitle(), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))))
         Column(Modifier.align(Alignment.BottomCenter).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            // النص الإنجليزي كشعار
             Text(movie.displayTitle(), style = TextStyle(brush = Brush.verticalGradient(listOf(Color.White, Color(0xFFFFD9EF), Color(0xFFD7B6FF))), fontSize = 36.sp, lineHeight = 42.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.SansSerif, textAlign = TextAlign.Center, shadow = Shadow(Color.Black.copy(alpha = 0.75f), Offset(0f, 6f), 18f)), maxLines = 2, overflow = TextOverflow.Ellipsis)
             Box(Modifier.padding(top = 10.dp).width(44.dp).height(3.dp).clip(CircleShape).background(Brush.horizontalGradient(listOf(Purple, Pink))))
             Text(tags, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 14.dp))

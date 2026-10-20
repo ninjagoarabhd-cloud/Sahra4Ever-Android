@@ -35,8 +35,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font // ✅ إضافة Font
-import androidx.compose.ui.text.font.FontFamily // ✅ إضافة FontFamily
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,7 +66,6 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
-// ✅ تعريف الخطوط
 val CairoBold = FontFamily(Font(R.font.cairo_bold, FontWeight.Bold))
 val CairoLight = FontFamily(Font(R.font.cairo_light, FontWeight.Light))
 
@@ -94,28 +93,38 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
 
     try {
         if (mediaType == "tv") {
-            // ✅ نجلب بالعربية فقط
-            val d = api.getTvDetails(id, API_KEY, "ar-SA") 
-            title = d.name ?: ""
-            overview = d.overview ?: ""
-            backdrop = d.backdropPath
-            poster = d.posterPath
-            rating = d.voteAverage
-            date = d.firstAirDate
-            seasons = d.seasons
+            // 1. نجلب بالعربية أولاً
+            val arD = api.getTvDetails(id, API_KEY, "ar-SA")
+            title = arD.name ?: ""
+            overview = arD.overview ?: ""
+            backdrop = arD.backdropPath
+            poster = arD.posterPath
+            rating = arD.voteAverage
+            date = arD.firstAirDate
+            seasons = arD.seasons
+
+            // 2. إذا كانت القصة فارغة، نجلب النسخة الإنجليزية
+            if (overview.isBlank()) {
+                val enD = api.getTvDetails(id, API_KEY, "en-US")
+                overview = enD.overview ?: ""
+            }
         } else {
-            // ✅ نجلب بالعربية فقط
-            val d = api.getMovieDetails(id, API_KEY, "ar-SA") 
-            title = d.title ?: ""
-            overview = d.overview ?: ""
-            backdrop = d.backdropPath
-            poster = d.posterPath
-            rating = d.voteAverage
-            date = d.releaseDate
+            val arD = api.getMovieDetails(id, API_KEY, "ar-SA")
+            title = arD.title ?: ""
+            overview = arD.overview ?: ""
+            backdrop = arD.backdropPath
+            poster = arD.posterPath
+            rating = arD.voteAverage
+            date = arD.releaseDate
+
+            if (overview.isBlank()) {
+                val enD = api.getMovieDetails(id, API_KEY, "en-US")
+                overview = enD.overview ?: ""
+            }
         }
     } catch (e: Exception) { }
 
-    // إذا كانت القصة فارغة، نضع رسالة افتراضية
+    // في حال عدم وجود قصة بأي لغة
     if (overview.isBlank()) overview = "لا توجد قصة متاحة حالياً."
 
     return DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
@@ -157,21 +166,23 @@ fun DetailsScreen(
         var error by remember { mutableStateOf(false) }
         var reloadKey by remember { mutableIntStateOf(0) }
 
-        // نوافذ السيرفرات والمواسم
         var showSeasonSheet by remember { mutableStateOf(false) }
         var showServerSheet by remember { mutableStateOf(false) }
         var selectedSeason by remember { mutableStateOf<Season?>(null) }
         var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
-        var isLoadingEpisodes by remember { mutableStateOf(false) }
         var selectedEpisodeNumber by remember { mutableIntStateOf(initialEpisode) }
         val sheetState = rememberModalBottomSheetState()
 
         LaunchedEffect(movieId, mediaType, reloadKey) {
             error = false
             try {
+                // جلب البيانات الأساسية فوراً
                 val d = fetchDetails(movieId, mediaType)
                 ui = d
-                accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
+                // استخراج اللون يعمل في الخلفية ولا يعطل عرض الواجهة
+                launch(Dispatchers.IO) {
+                    accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -179,7 +190,6 @@ fun DetailsScreen(
             }
         }
 
-        // التشغيل التلقائي من "متابعة المشاهدة"
         LaunchedEffect(autoShowServers, ui) {
             if (autoShowServers && ui != null) {
                 if (mediaType == "tv") {
@@ -196,9 +206,7 @@ fun DetailsScreen(
 
         fun loadSeason(season: Season) {
             selectedSeason = season
-            isLoadingEpisodes = true
             episodes = List(season.episodeCount ?: 1) { Episode(it + 1, "الحلقة ${it + 1}", "") }
-            isLoadingEpisodes = false
         }
 
         val top by animateColorAsState(
@@ -245,7 +253,6 @@ fun DetailsScreen(
 
             BackButton(onBack, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(12.dp))
 
-            // قائمة المواسم
             if (showSeasonSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showSeasonSheet = false },
@@ -295,7 +302,6 @@ fun DetailsScreen(
                 }
             }
 
-            // قائمة السيرفرات
             if (showServerSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showServerSheet = false },
@@ -404,7 +410,6 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                     .navigationBarsPadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ✅ اسم العمل بخط CairoBold
                 Text(
                     d.title,
                     style = TextStyle(
@@ -412,7 +417,7 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                         fontSize = 40.sp,
                         lineHeight = 46.sp,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = CairoBold, // ✅ الخط الجديد
+                        fontFamily = CairoBold,
                         textAlign = TextAlign.Center,
                         shadow = Shadow(Color.Black.copy(alpha = 0.75f), Offset(0f, 6f), 18f)
                     ),
@@ -459,14 +464,13 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                 ) {
                     Text("القصة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
-                    // ✅ القصة بخط CairoLight
                     Text(
                         overview,
                         style = TextStyle(
                             color = Muted,
                             fontSize = 15.sp,
                             lineHeight = 24.sp,
-                            fontFamily = CairoLight // ✅ الخط الجديد
+                            fontFamily = CairoLight
                         ),
                         maxLines = if (expanded) Int.MAX_VALUE else 5,
                         overflow = TextOverflow.Ellipsis

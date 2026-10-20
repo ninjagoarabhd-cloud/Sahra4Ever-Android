@@ -57,20 +57,17 @@ fun SearchScreen(
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     
-    // حالة التمرير (Pagination)
     var page by remember { mutableIntStateOf(1) }
     var isLastPage by remember { mutableStateOf(false) }
     var isLoadingMore by remember { mutableStateOf(false) }
 
     val categories = listOf("الكل", "أفلام", "مسلسلات", "أكشن", "دراما", "خيال علمي", "كوميدي", "رعب")
 
-    // دالة جلب البيانات
     suspend fun fetchData(isLoadMore: Boolean = false) {
         if (isLoadMore) isLoadingMore = true else { isLoading = true; page = 1; isLastPage = false }
         
         try {
             val api = TMDBApi.create()
-            // نستخدم en-US لضمان البوسترات الإنجليزية
             val response = if (query.isNotBlank()) {
                 api.searchMulti(API_KEY, query, page, "en-US")
             } else {
@@ -88,7 +85,7 @@ fun SearchScreen(
             
             val newResults = response.results.filter { it.posterPath != null }
             if (isLoadMore) results = results + newResults else results = newResults
-            isLastPage = response.results.isEmpty() || page >= 10 // نكتفي بـ 10 صفحات (200 نتيجة) كحد أقصى
+            isLastPage = response.results.isEmpty() || page >= 10
             
         } catch (e: Exception) {
             if (!isLoadMore) results = emptyList()
@@ -99,13 +96,15 @@ fun SearchScreen(
     }
 
     LaunchedEffect(query, selectedCategory) {
-        delay(400) // Debounce
+        // تأخير بسيط فقط عند الكتابة في البحث
+        if (query.isNotBlank()) {
+            delay(400)
+        }
         fetchData(false)
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Ink)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // الشريط العلوي
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -117,12 +116,11 @@ fun SearchScreen(
                 Text("البحث", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
 
-            // شريط البحث
             TextField(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                placeholder = { Text("ابحث بالاسم، الممثل، التصنيف...", color = Muted) },
+                placeholder = { Text("بحث", color = Muted) }, // ✅ تم تغيير النص هنا
                 leadingIcon = { Icon(Icons.Outlined.Search, null, tint = Pink) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -145,7 +143,6 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // التصنيفات
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -170,7 +167,6 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // النتائج
             if (isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Pink)
@@ -198,7 +194,6 @@ fun SearchScreen(
                         }
                     }
                     
-                    // زر تحميل المزيد
                     if (!isLastPage) {
                         item {
                             Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
@@ -234,7 +229,7 @@ fun SearchMovieCard(movie: Movie, onClick: () -> Unit) {
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
-            model = img(movie.posterPath), // صورة إنجليزية
+            model = img(movie.posterPath),
             contentDescription = movie.title,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
@@ -264,7 +259,6 @@ fun SearchMovieCard(movie: Movie, onClick: () -> Unit) {
                 .background(Pink, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
         )
 
-        // عرض الاسم الإنجليزي
         Text(
             text = movie.title ?: movie.name ?: "",
             color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black,
