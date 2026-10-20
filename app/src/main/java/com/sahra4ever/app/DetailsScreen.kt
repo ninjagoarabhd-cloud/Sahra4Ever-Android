@@ -51,6 +51,7 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch // ✅ تم إضافة هذا السطر هنا
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -93,7 +94,6 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
 
     try {
         if (mediaType == "tv") {
-            // 1. نجلب بالعربية أولاً
             val arD = api.getTvDetails(id, API_KEY, "ar-SA")
             title = arD.name ?: ""
             overview = arD.overview ?: ""
@@ -103,7 +103,6 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
             date = arD.firstAirDate
             seasons = arD.seasons
 
-            // 2. إذا كانت القصة فارغة، نجلب النسخة الإنجليزية
             if (overview.isBlank()) {
                 val enD = api.getTvDetails(id, API_KEY, "en-US")
                 overview = enD.overview ?: ""
@@ -124,7 +123,6 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
         }
     } catch (e: Exception) { }
 
-    // في حال عدم وجود قصة بأي لغة
     if (overview.isBlank()) overview = "لا توجد قصة متاحة حالياً."
 
     return DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
@@ -176,10 +174,8 @@ fun DetailsScreen(
         LaunchedEffect(movieId, mediaType, reloadKey) {
             error = false
             try {
-                // جلب البيانات الأساسية فوراً
                 val d = fetchDetails(movieId, mediaType)
                 ui = d
-                // استخراج اللون يعمل في الخلفية ولا يعطل عرض الواجهة
                 launch(Dispatchers.IO) {
                     accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
                 }
