@@ -1,10 +1,12 @@
+@file:OptIn(ExperimentalFoundationApi::class, FlowPreview::class) // ✅ السطر السحري هنا
+
 package com.sahra4ever.app
 
 import android.util.LruCache
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi // ✅
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -163,7 +165,6 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class, FlowPreview::class) // ✅ الإذن موجود هنا
 @Composable
 private fun HomeContent(
     onMovieClick: (Int, String, String) -> Unit,
@@ -335,7 +336,6 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class) // ✅ الإذن موجود هنا
 @Composable
 private fun HomeFeed(
     heroes: List<Movie>, rest: List<Movie>, nowPlaying: List<Movie>, airing: List<Movie>, anime: List<Movie>,
@@ -446,7 +446,6 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifi
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class) // ✅ الإذن موجود هنا
 @Composable
 private fun Dots(count: Int, pagerState: PagerState) {
     val current = pagerState.currentPage
@@ -484,7 +483,6 @@ private fun PosterCard(movie: Movie, modifier: Modifier = Modifier, onClick: () 
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class) // ✅ الإذن موجود هنا
 @Composable
 private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick: (Movie) -> Unit) {
     Box(Modifier.fillMaxSize()) {
