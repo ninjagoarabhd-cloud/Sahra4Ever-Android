@@ -50,7 +50,21 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): MovieResponse
 
-    // 7. تفاصيل فيلم
+    // 7. الأفلام الشائعة (لصفحة البحث)
+    @GET("movie/popular")
+    suspend fun getPopularMovies(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "ar-SA"
+    ): MovieResponse
+
+    // 8. المسلسلات الشائعة (لصفحة البحث)
+    @GET("tv/popular")
+    suspend fun getPopularTvShows(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "ar-SA"
+    ): MovieResponse
+
+    // 9. تفاصيل فيلم
     @GET("movie/{id}")
     suspend fun getMovieDetails(
         @Path("id") id: Int,
@@ -58,7 +72,7 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): Movie
 
-    // 8. تفاصيل مسلسل
+    // 10. تفاصيل مسلسل
     @GET("tv/{id}")
     suspend fun getTvDetails(
         @Path("id") id: Int,
@@ -66,7 +80,7 @@ interface TMDBApi {
         @Query("language") language: String = "ar-SA"
     ): Movie
 
-    // 9. حلقات الموسم
+    // 11. حلقات الموسم
     @GET("tv/{id}/season/{season_number}")
     suspend fun getTvSeason(
         @Path("id") id: Int,

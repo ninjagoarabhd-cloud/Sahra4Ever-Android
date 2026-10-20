@@ -6,19 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,29 +17,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset // ✅ تم إضافة الاستيراد
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Shadow // ✅ تم إضافة الاستيراد
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.layout.ContentScale
@@ -93,7 +73,8 @@ private data class DetailsUi(
     val backdropPath: String?,
     val posterPath: String?,
     val rating: Double?,
-    val date: String?
+    val date: String?,
+    val seasons: List<Season>? = null
 )
 
 private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
@@ -106,7 +87,8 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
             backdropPath = d.backdropPath,
             posterPath = d.posterPath,
             rating = d.voteAverage,
-            date = d.firstAirDate
+            date = d.firstAirDate,
+            seasons = d.seasons
         )
     } else {
         val d = api.getMovieDetails(id, API_KEY)
@@ -139,8 +121,8 @@ private suspend fun extractColor(context: Context, url: String?): Color? {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-// ✅ تم إضافة المتغيرات المطلوبة هنا
 fun DetailsScreen(
     movieId: Int,
     mediaType: String,
@@ -151,87 +133,203 @@ fun DetailsScreen(
     onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        DetailsContent(movieId, mediaType, initialSeason, initialEpisode, autoShowServers, onBack, onPlayClick)
-    }
-}
+        val context = LocalContext.current
+        var ui by remember(movieId, mediaType) { mutableStateOf<DetailsUi?>(null) }
+        var accent by remember(movieId, mediaType) { mutableStateOf<Color?>(null) }
+        var error by remember { mutableStateOf(false) }
+        var reloadKey by remember { mutableIntStateOf(0) }
 
-@Composable
-private fun DetailsContent(
-    movieId: Int,
-    mediaType: String,
-    initialSeason: Int,
-    initialEpisode: Int,
-    autoShowServers: Boolean,
-    onBack: () -> Unit,
-    onPlayClick: (Int, String, String, Int, Int, Int) -> Unit
-) {
-    val context = LocalContext.current
-    var ui by remember(movieId, mediaType) { mutableStateOf<DetailsUi?>(null) }
-    var accent by remember(movieId, mediaType) { mutableStateOf<Color?>(null) }
-    var error by remember { mutableStateOf(false) }
-    var reloadKey by remember { mutableIntStateOf(0) }
+        // نوافذ السيرفرات والمواسم
+        var showSeasonSheet by remember { mutableStateOf(false) }
+        var showServerSheet by remember { mutableStateOf(false) }
+        var selectedSeason by remember { mutableStateOf<Season?>(null) }
+        var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
+        var isLoadingEpisodes by remember { mutableStateOf(false) }
+        var selectedEpisodeNumber by remember { mutableIntStateOf(initialEpisode) }
+        val sheetState = rememberModalBottomSheetState()
 
-    LaunchedEffect(movieId, mediaType, reloadKey) {
-        error = false
-        try {
-            val d = fetchDetails(movieId, mediaType)
-            ui = d
-            accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = true
-        }
-    }
-
-    val top by animateColorAsState(
-        accent?.let { lerpColor(it, Color.Black, 0.3f) } ?: DefaultTop, tween(700), label = "top"
-    )
-    val bottom by animateColorAsState(
-        accent?.let { lerpColor(it, Ink, 0.88f) } ?: Ink, tween(700), label = "bottom"
-    )
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(top, bottom)))
-    ) {
-        val d = ui
-        when {
-            d != null -> DetailsBody(d) {
-                // حفظ في السجل
-                HistoryManager.addToHistory(
-                    context = context,
-                    item = WatchHistory(
-                        id = movieId,
-                        title = d.title,
-                        type = mediaType,
-                        posterPath = d.posterPath,
-                        season = initialSeason,
-                        episode = initialEpisode
-                    )
-                )
-                // التشغيل بالبيانات الصحيحة
-                onPlayClick(movieId, mediaType, d.title, initialSeason, initialEpisode, 0)
-            }
-            error -> Column(
-                Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("تعذّر تحميل التفاصيل", color = Color.White, fontSize = 16.sp)
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = { reloadKey++ },
-                    colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Color.White)
-                ) { Text("إعادة المحاولة") }
-            }
-            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Pink)
+        LaunchedEffect(movieId, mediaType, reloadKey) {
+            error = false
+            try {
+                val d = fetchDetails(movieId, mediaType)
+                ui = d
+                accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = true
             }
         }
 
-        BackButton(onBack, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(12.dp))
+        // التشغيل التلقائي من "متابعة المشاهدة"
+        LaunchedEffect(autoShowServers, ui) {
+            if (autoShowServers && ui != null) {
+                if (mediaType == "tv") {
+                    val targetSeason = ui?.seasons?.find { it.seasonNumber == initialSeason }
+                        ?: ui?.seasons?.firstOrNull { it.seasonNumber > 0 }
+                    if (targetSeason != null) {
+                        selectedSeason = targetSeason
+                        episodes = List(targetSeason.episodeCount ?: 1) { Episode(it + 1, "الحلقة ${it + 1}", "") }
+                    }
+                }
+                showServerSheet = true
+            }
+        }
+
+        fun loadSeason(season: Season) {
+            selectedSeason = season
+            isLoadingEpisodes = true
+            episodes = List(season.episodeCount ?: 1) { Episode(it + 1, "الحلقة ${it + 1}", "") }
+            isLoadingEpisodes = false
+        }
+
+        val top by animateColorAsState(
+            accent?.let { lerpColor(it, Color.Black, 0.3f) } ?: DefaultTop, tween(700), label = "top"
+        )
+        val bottom by animateColorAsState(
+            accent?.let { lerpColor(it, Ink, 0.88f) } ?: Ink, tween(700), label = "bottom"
+        )
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(listOf(top, bottom)))
+        ) {
+            val d = ui
+            when {
+                d != null -> DetailsBody(d) {
+                    if (mediaType == "tv") {
+                        if (autoShowServers) {
+                            showServerSheet = true
+                        } else {
+                            showSeasonSheet = true
+                        }
+                    } else {
+                        showServerSheet = true
+                    }
+                }
+                error -> Column(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("تعذّر تحميل التفاصيل", color = Color.White, fontSize = 16.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { reloadKey++ },
+                        colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Color.White)
+                    ) { Text("إعادة المحاولة") }
+                }
+                else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Pink)
+                }
+            }
+
+            BackButton(onBack, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(12.dp))
+
+            // قائمة المواسم
+            if (showSeasonSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showSeasonSheet = false },
+                    sheetState = sheetState,
+                    containerColor = Color(0xFF1E1E1E)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("اختر الموسم:", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ui?.seasons?.filter { it.seasonNumber > 0 } ?: emptyList()) { season ->
+                                Button(
+                                    onClick = { loadSeason(season) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (selectedSeason?.seasonNumber == season.seasonNumber) Color.White else Color.DarkGray,
+                                        contentColor = if (selectedSeason?.seasonNumber == season.seasonNumber) Color.Black else Color.White
+                                    )
+                                ) {
+                                    Text(season.name ?: "الموسم ${season.seasonNumber}")
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("الحلقات:", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                            items(episodes) { ep ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedEpisodeNumber = ep.episodeNumber
+                                            showSeasonSheet = false
+                                            showServerSheet = true
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Outlined.PlayArrow, null, tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("الحلقة ${ep.episodeNumber}", color = Color.White)
+                                }
+                                Divider(color = Color.DarkGray)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // قائمة السيرفرات
+            if (showServerSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showServerSheet = false },
+                    sheetState = sheetState,
+                    containerColor = Color(0xFF1E1E1E)
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text(
+                            if (mediaType == "tv") "الحلقة $selectedEpisodeNumber" else ui?.title ?: "",
+                            color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        val servers = listOf(
+                            "Server 1" to 0, "Server 2" to 1, "Server 3" to 2, "Server 4" to 3
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            servers.take(2).forEach { (name, index) ->
+                                Button(
+                                    onClick = {
+                                        HistoryManager.addToHistory(
+                                            context,
+                                            WatchHistory(movieId, ui?.title ?: "", mediaType, ui?.posterPath, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber)
+                                        )
+                                        onPlayClick(movieId, mediaType, ui?.title ?: "", selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, index)
+                                    },
+                                    modifier = Modifier.weight(1f).height(60.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(30.dp)
+                                ) { Text(name, color = Color.Black, fontWeight = FontWeight.Bold) }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            servers.drop(2).forEach { (name, index) ->
+                                Button(
+                                    onClick = {
+                                        HistoryManager.addToHistory(
+                                            context,
+                                            WatchHistory(movieId, ui?.title ?: "", mediaType, ui?.posterPath, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber)
+                                        )
+                                        onPlayClick(movieId, mediaType, ui?.title ?: "", selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, index)
+                                    },
+                                    modifier = Modifier.weight(1f).height(60.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(30.dp)
+                                ) { Text(name, color = Color.Black, fontWeight = FontWeight.Bold) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

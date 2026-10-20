@@ -22,17 +22,37 @@ class MainActivity : ComponentActivity() {
                     composable("home") {
                         HomeScreen(
                             onMovieClick = { id, type, title ->
-                                // الانتقال العادي (بدون تشغيل تلقائي)
                                 navController.navigate("details/$id/$type/$title/1/1/false")
                             },
                             onContinueWatchingClick = { historyItem ->
-                                // الانتقال من قسم متابعة المشاهدة (تشغيل تلقائي = true)
                                 navController.navigate("details/${historyItem.id}/${historyItem.type}/${historyItem.title}/${historyItem.season}/${historyItem.episode}/true")
+                            },
+                            onCategoryClick = { category ->
+                                // الانتقال لصفحة البحث مع التصنيف المختار
+                                navController.navigate("search/$category")
+                            },
+                            onSearchClick = {
+                                navController.navigate("search/الكل")
+                            }
+                        )
+                    }
+
+                    // 2. صفحة البحث الجديدة
+                    composable(
+                        route = "search/{category}",
+                        arguments = listOf(navArgument("category") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val category = backStackEntry.arguments?.getString("category") ?: "الكل"
+                        SearchScreen(
+                            initialCategory = category,
+                            onBack = { navController.popBackStack() },
+                            onMovieClick = { id, type, title ->
+                                navController.navigate("details/$id/$type/$title/1/1/false")
                             }
                         )
                     }
                     
-                    // 2. شاشة التفاصيل
+                    // 3. شاشة التفاصيل
                     composable(
                         route = "details/{movieId}/{mediaType}/{title}/{season}/{episode}/{autoPlay}",
                         arguments = listOf(
@@ -64,7 +84,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     
-                    // 3. شاشة المشغل
+                    // 4. شاشة المشغل (التي برمجناها بالكامل سابقاً)
                     composable(
                         route = "player/{movieId}/{mediaType}/{title}/{season}/{episode}/{serverIndex}",
                         arguments = listOf(
