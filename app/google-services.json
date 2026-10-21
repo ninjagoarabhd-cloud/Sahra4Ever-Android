@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "802099276080",
+    "project_id": "sahra4ever",
+    "storage_bucket": "sahra4ever.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:802099276080:android:cd2c3940d60703948080f5",
+        "android_client_info": {
+          "package_name": "com.sahra4ever.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaeaXOiKDvaUpwWAy-naGRkL0wrAwSxkQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

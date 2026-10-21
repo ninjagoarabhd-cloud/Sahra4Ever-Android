@@ -219,7 +219,8 @@ fun DetailsScreen(
         ) {
             val d = ui
             when {
-                d != null -> DetailsBody(d) {
+                // ✅ جديد: commentsContent يضيف قسم التعليقات أسفل الصفحة (لا تغيير في باقي المنطق)
+                d != null -> DetailsBody(d, commentsContent = { CommentSection(movieId, mediaType) }) {
                     if (mediaType == "tv") {
                         if (autoShowServers) {
                             showServerSheet = true
@@ -386,13 +387,14 @@ private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
+private fun DetailsBody(d: DetailsUi, commentsContent: @Composable () -> Unit, onPlay: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val year = d.date?.take(4)?.takeIf { it.length == 4 }
     val rating = d.rating?.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }
     val overview = d.overview.ifBlank { "لا توجد قصة متاحة حالياً." }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    // imePadding: يرفع المحتوى فوق الكيبورد عند كتابة تعليق (لا أثر بصري بدون الكيبورد)
+    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
         Box(Modifier.fillMaxWidth()) {
             AsyncImage(
                 model = img(d.backdropPath ?: d.posterPath, "w780"),
@@ -498,6 +500,10 @@ private fun DetailsBody(d: DetailsUi, onPlay: () -> Unit) {
                         )
                     }
                 }
+
+                // ✅ جديد: قسم التعليقات أسفل صفحة التفاصيل
+                Spacer(modifier = Modifier.height(28.dp))
+                commentsContent()
             }
         }
     }

@@ -158,10 +158,12 @@ fun HomeScreen(
     onMovieClick: (Int, String, String) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
     onCategoryClick: (String) -> Unit,
-    onSearchClick: () -> Unit
+    onSearchClick: () -> Unit,
+    onSupportClick: () -> Unit = {},
+    onAccountClick: () -> Unit = {}
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        HomeContent(onMovieClick, onContinueWatchingClick, onCategoryClick, onSearchClick)
+        HomeContent(onMovieClick, onContinueWatchingClick, onCategoryClick, onSearchClick, onSupportClick, onAccountClick)
     }
 }
 
@@ -170,7 +172,9 @@ private fun HomeContent(
     onMovieClick: (Int, String, String) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
     onCategoryClick: (String) -> Unit,
-    onSearchClick: () -> Unit
+    onSearchClick: () -> Unit,
+    onSupportClick: () -> Unit,
+    onAccountClick: () -> Unit
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
@@ -290,6 +294,8 @@ private fun HomeContent(
                 tab = i
                 if (i == 1) onSearchClick()
                 if (i == 0) focusRequester.requestFocus()
+                if (i == 2) onSupportClick()
+                if (i == 3) onAccountClick()
             },
             modifier = Modifier.align(Alignment.BottomCenter)
         )

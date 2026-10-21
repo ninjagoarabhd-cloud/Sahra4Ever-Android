@@ -16,6 +16,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -194,6 +195,24 @@ private fun createPlayerWebView(
     }
 }
 
+/** الشريط العلوي (سهم رجوع + اسم العمل) — مستخرج لإعادة استخدامه في الوضع العادي وملء الشاشة. */
+@Composable
+private fun PlayerTopBar(title: String, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(text = title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 @Composable
 fun PlayerScreen(
     movieId: Int,
@@ -209,6 +228,8 @@ fun PlayerScreen(
     val debug = remember { (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0 }
 
     val profile = SERVERS[initialServerIndex.coerceIn(SERVERS.indices)]
+    // الواجهة العربية داخل ملء الشاشة للسيرفر الأول (VsEmbed) فقط
+    val isVsEmbed = profile === SERVERS[0]
     val url = remember(profile, mediaType, movieId, season, episode) {
         if (mediaType == "tv") "${profile.baseUrl}tv/$movieId/$season/$episode"
         else "${profile.baseUrl}movie/$movieId"
@@ -270,25 +291,20 @@ fun PlayerScreen(
 
         val cv = customView
 
+        // زر الرجوع في النظام يخرج من ملء الشاشة (بديل زر X المحذوف)
+        BackHandler(enabled = cv != null) {
+            customViewCallback?.onCustomViewHidden()
+            customView = null
+            customViewCallback = null
+        }
+
         AnimatedVisibility(
             visible = showOverlay && cv == null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(text = title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
+            PlayerTopBar(title = title, onBack = onBack)
         }
 
         if (isLoading && cv == null) {
@@ -305,17 +321,32 @@ fun PlayerScreen(
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 AndroidView(
                     factory = { (cv.parent as? ViewGroup)?.removeView(cv); cv },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { showOverlay = !showOverlay }
                 )
-                IconButton(
-                    onClick = {
-                        customViewCallback?.onCustomViewHidden()
-                        customView = null
-                        customViewCallback = null
-                    },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                ) {
-                    Text("X", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+
+                // الواجهة العربية داخل ملء الشاشة: السيرفر الأول فقط، تظهر باللمس وتختفي بعد 3 ثوانٍ
+                if (isVsEmbed) {
+                    AnimatedVisibility(
+                        visible = showOverlay,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.TopStart)
+                    ) {
+                        PlayerTopBar(
+                            title = title,
+                            onBack = {
+                                customViewCallback?.onCustomViewHidden()
+                                customView = null
+                                customViewCallback = null
+                                onBack() // الخروج من السيرفر
+                            }
+                        )
+                    }
                 }
             }
         }
