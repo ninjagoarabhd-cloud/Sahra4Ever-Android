@@ -8,10 +8,12 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -41,9 +43,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun AppNavHost() {
     val navController = rememberNavController()
+    val context = LocalContext.current
+
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
             HomeScreen(
@@ -74,7 +78,7 @@ private fun AppNavHost() {
             AccountScreen(
                 onBack = { navController.popBackStack() },
                 onFavoritesClick = {
-                    Toast.makeText(this@MainActivity, "قائمتي قادمة قريباً", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "قائمتي قادمة قريباً", Toast.LENGTH_SHORT).show()
                 }
             )
         }
