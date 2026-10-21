@@ -51,7 +51,7 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch // ✅ تم إضافة هذا السطر هنا
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -326,7 +326,24 @@ fun DetailsScreen(
                                     modifier = Modifier.weight(1f).height(60.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                     shape = RoundedCornerShape(30.dp)
-                                ) { Text(name, color = Color.Black, fontWeight = FontWeight.Bold) }
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(name, color = Color.Black, fontWeight = FontWeight.Bold)
+                                        if (index == 0) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            // ✅ شعار VIP الذهبي
+                                            Text(
+                                                "👑 VIP",
+                                                color = Color(0xFFFFD700),
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier
+                                                    .background(Color.Black, RoundedCornerShape(4.dp))
+                                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
