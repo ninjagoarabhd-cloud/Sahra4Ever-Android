@@ -2,23 +2,52 @@ package com.sahra4ever.app
 
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+
+private val Ink = Color(0xFF0F0E14)
+
+private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
+    Triple("الرئيسية", Icons.Outlined.Home, "home"),
+    Triple("بحث", Icons.Outlined.Search, "search"),
+    Triple("ادعمنا", Icons.Outlined.FavoriteBorder, "support"),
+    Triple("حسابي", Icons.Outlined.Person, "account")
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,20 +64,102 @@ class MainActivity : ComponentActivity() {
                     if (splashVisible) {
                         SplashScreen(onFinished = { showSplash = false })
                     } else {
-                        AppNavHost()
+                        AppRoot()
                     }
                 }
+            }
+        }
+    }
+
+    // ✅ تنظيف أي حالة إعلان معلّقة (Timeout أو isShowing) عند إغلاق النشاط نهائياً
+    override fun onDestroy() {
+        super.onDestroy()
+        UnityAdsManager.reset()
+    }
+}
+
+/** ✅ (نقطة 6) المسارات التي يجب أن يختفي فيها الشريط السفلي تماماً. */
+private fun shouldHideBottomBar(route: String?): Boolean {
+    if (route == null) return false
+    return route.startsWith("details") || route.startsWith("player") || route == "mylist"
+}
+
+/**
+ * ✅ (نقطة 6) الحاوية الجذرية: Scaffold يحتوي NavHost + الشريط السفلي.
+ * نمرر innerPadding مباشرة إلى NavHost (وليس لكل شاشة يدوياً) حتى تُحجز
+ * المساحة تلقائياً فقط عندما يكون الشريط ظاهراً، ودون أي حاجة لتعديل تصميم
+ * الشاشات الأخرى (Home/Search/Support/Account) يدوياً.
+ */
+@Composable
+private fun AppRoot() {
+    val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
+
+    Scaffold(
+        containerColor = Ink,
+        bottomBar = {
+            if (!shouldHideBottomBar(currentRoute)) {
+                AppBottomNav(currentRoute = currentRoute, navController = navController)
+            }
+        }
+    ) { innerPadding ->
+        AppNavHost(
+            navController = navController,
+            modifier = Modifier.padding(innerPadding)
+        )
+    }
+}
+
+@Composable
+private fun AppBottomNav(currentRoute: String?, navController: NavHostController) {
+    val shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Ink.copy(alpha = 0.92f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
+            .navigationBarsPadding()
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceAround
+    ) {
+        BottomNavItems.forEach { (label, icon, route) ->
+            val selected = when (route) {
+                "home" -> currentRoute == "home"
+                "search" -> currentRoute?.startsWith("search") == true
+                else -> currentRoute == route
+            }
+            val tint = if (selected) Color.White else Color(0xFFA9A8B4)
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        when (route) {
+                            "home" -> if (currentRoute != "home") {
+                                navController.navigate("home") {
+                                    popUpTo("home") { inclusive = true }
+                                    launchSingleTop = true
+                                }
+                            }
+                            "search" -> navController.navigate("search/${Uri.encode("الكل")}")
+                            "support" -> navController.navigate("support")
+                            "account" -> navController.navigate("account")
+                        }
+                    }
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(icon, label, tint = tint)
+                Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
 }
 
 @Composable
-private fun AppNavHost() {
-    val navController = rememberNavController()
-    val context = LocalContext.current
-
-    NavHost(navController = navController, startDestination = "home") {
+private fun AppNavHost(navController: NavHostController, modifier: Modifier = Modifier) {
+    NavHost(navController = navController, startDestination = "home", modifier = modifier) {
         composable("home") {
             HomeScreen(
                 onMovieClick = { id, type, title ->
@@ -60,14 +171,17 @@ private fun AppNavHost() {
                 onCategoryClick = { category ->
                     navController.navigate("search/${Uri.encode(category)}")
                 },
-                onSearchClick = {
-                    navController.navigate("search/${Uri.encode("الكل")}")
-                },
-                onSupportClick = {
-                    navController.navigate("support")
-                },
-                onAccountClick = {
-                    navController.navigate("account")
+                onMyListClick = {
+                    navController.navigate("mylist")
+                }
+            )
+        }
+        composable("mylist") {
+            // ✅ (نقطة 1-ب) شاشة قائمتي الجديدة
+            MyListScreen(
+                onBack = { navController.popBackStack() },
+                onMovieClick = { id, type, title ->
+                    navController.navigate("details/$id/$type/${Uri.encode(title)}/1/1/false")
                 }
             )
         }
@@ -77,8 +191,9 @@ private fun AppNavHost() {
         composable("account") {
             AccountScreen(
                 onBack = { navController.popBackStack() },
+                // ✅ (نقطة 5) تفتح شاشة قائمتي مباشرة بدلاً من Toast
                 onFavoritesClick = {
-                    Toast.makeText(context, "قائمتي قادمة قريباً", Toast.LENGTH_SHORT).show()
+                    navController.navigate("mylist")
                 }
             )
         }
@@ -112,7 +227,7 @@ private fun AppNavHost() {
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
-            
+
             DetailsScreen(
                 movieId = movieId,
                 mediaType = mediaType,
@@ -142,7 +257,7 @@ private fun AppNavHost() {
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val serverIndex = backStackEntry.arguments?.getInt("serverIndex") ?: 0
-            
+
             PlayerScreen(
                 movieId = movieId,
                 mediaType = mediaType,

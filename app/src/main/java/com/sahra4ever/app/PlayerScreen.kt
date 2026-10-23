@@ -56,8 +56,8 @@ private data class ServerProfile(
 
 // ✅ الترتيب المطلوب: VsEmbed هو السيرفر 1 (VIP)، EmbedMaster هو السيرفر 2
 private val SERVERS = listOf(
-    ServerProfile("Server 1", "https://vsembed.ru/embed/", strict = true), // VsEmbed
-    ServerProfile("Server 2", "https://embedmaster.link/v2hggflri06a65jvvp/", strict = false, allowedHosts = listOf("embedmaster.link")), // EmbedMaster
+    ServerProfile("Server 1", "https://vsembed.ru/embed/", strict = true),
+    ServerProfile("Server 2", "https://embedmaster.link/v2hggflri06a65jvvp/", strict = false, allowedHosts = listOf("embedmaster.link")),
     ServerProfile("Server 3", "https://vidlink.pro/", strict = true),
     ServerProfile("Server 4", "https://vidsrc.wiki/embed/", strict = true)
 )
@@ -130,7 +130,7 @@ private class PlayerWebViewClient(
         val host = req.url.host?.lowercase().orEmpty()
         if (AD_KEYWORDS.any { host.contains(it) }) return false
         if (hostMatches(host, profile.allowedHosts)) return true
-        if (!req.isForMainFrame) return true 
+        if (!req.isForMainFrame) return true
         return !profile.lockNavigation && !req.hasGesture()
     }
 
@@ -195,6 +195,32 @@ private fun createPlayerWebView(
     }
 }
 
+/**
+ * ✅ تدمير آمن وكامل للـ WebView.
+ * هذا هو جوهر حل مشكلة الشاشة السوداء العالقة:
+ * - إيقاف التحميل ووضع الصفحة على about:blank يمنع أي عمليات JS/وسائط معلّقة بالخلفية.
+ * - إزالته من الـ parent قبل destroy() تمنع ترك View عالقة في شجرة الـ Window.
+ */
+private fun destroyWebViewSafely(webView: WebView?) {
+    webView ?: return
+    try {
+        webView.apply {
+            stopLoading()
+            onPause()
+            clearHistory()
+            clearCache(true)
+            loadUrl("about:blank")
+            webChromeClient = null
+            webViewClient = object : WebViewClient() {}
+            (parent as? ViewGroup)?.removeView(this)
+            removeAllViews()
+            destroy()
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "Error destroying WebView", e)
+    }
+}
+
 /** الشريط العلوي (سهم رجوع + اسم العمل) — مستخرج لإعادة استخدامه في الوضع العادي وملء الشاشة. */
 @Composable
 private fun PlayerTopBar(title: String, onBack: () -> Unit) {
@@ -230,15 +256,20 @@ fun PlayerScreen(
     val profile = SERVERS[initialServerIndex.coerceIn(SERVERS.indices)]
     // الواجهة العربية داخل ملء الشاشة للسيرفر الأول (VsEmbed) فقط
     val isVsEmbed = profile === SERVERS[0]
+    // ✅ (تعديل جديد) السيرفر الرابع (vidsrc.wiki) يدعم تمرير ?sub=ar لتفعيل الترجمة العربية تلقائياً
+    val isVidSrcWiki = profile.name == "Server 4"
     val url = remember(profile, mediaType, movieId, season, episode) {
-        if (mediaType == "tv") "${profile.baseUrl}tv/$movieId/$season/$episode"
+        val base = if (mediaType == "tv") "${profile.baseUrl}tv/$movieId/$season/$episode"
         else "${profile.baseUrl}movie/$movieId"
+        if (isVidSrcWiki) "$base?sub=ar" else base
     }
 
     var isLoading by remember(url) { mutableStateOf(true) }
     var showOverlay by remember { mutableStateOf(true) }
     var customView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    // ✅ مرجع صريح للـ WebView الحالي كي نضمن تدميره الكامل عند مغادرة الشاشة
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
     LaunchedEffect(url) {
         delay(10_000)
@@ -252,6 +283,7 @@ fun PlayerScreen(
         }
     }
 
+    // ✅ إدارة الاتجاه وأشرطة النظام + تنظيف شامل عند الخروج النهائي من الشاشة
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         val controller = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
@@ -259,6 +291,22 @@ fun PlayerScreen(
         controller?.hide(WindowInsetsCompat.Type.systemBars())
 
         onDispose {
+            // 1) إخفاء أي Custom View (فيديو ملء الشاشة) عالق أولاً عبر الـ callback الأصلي؛
+            //    هذه الخطوة ضرورية جداً وإلا يبقى الـ WebView "معتقداً" أنه في وضع fullscreen
+            //    حتى بعد destroy()، مما يترك طبقة سوداء عالقة في نافذة التطبيق.
+            try {
+                customViewCallback?.onCustomViewHidden()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error hiding custom view on dispose", e)
+            }
+            customViewCallback = null
+            customView = null
+
+            // 2) تدمير الـ WebView تدميراً كاملاً
+            destroyWebViewSafely(webViewRef)
+            webViewRef = null
+
+            // 3) إعادة الاتجاه وأشرطة النظام لوضعها الطبيعي
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             controller?.show(WindowInsetsCompat.Type.systemBars())
         }
@@ -277,21 +325,29 @@ fun PlayerScreen(
                         onLoaded = { isLoading = false },
                         onShowCustom = { v, cb -> customView = v; customViewCallback = cb },
                         onHideCustom = { customView = null; customViewCallback = null }
-                    ).also { it.loadUrl(url) } 
+                    ).also {
+                        webViewRef = it
+                        it.loadUrl(url)
+                    }
                 },
-                onRelease = { it.stopLoading(); it.destroy() },
+                onRelease = { v ->
+                    // عند تغيّر الـ url (سيرفر آخر) يُستبدل الـ WebView القديم بآخر جديد،
+                    // تأكد من عدم مسح مرجع الـ WebView الحالي بالخطأ.
+                    if (webViewRef === v) webViewRef = null
+                    destroyWebViewSafely(v)
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { showOverlay = !showOverlay }
+                    ) { showOverlay = !showOverlay } // ✅ إظهار/إخفاء الشريط العلوي باللمس
             )
         }
 
         val cv = customView
 
-        // زر الرجوع في النظام يخرج من ملء الشاشة (بديل زر X المحذوف)
+        // زر الرجوع في النظام يخرج من ملء الشاشة أولاً (بديل زر X المحذوف)
         BackHandler(enabled = cv != null) {
             customViewCallback?.onCustomViewHidden()
             customView = null

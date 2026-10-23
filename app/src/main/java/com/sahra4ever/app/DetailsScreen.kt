@@ -1,6 +1,9 @@
 package com.sahra4ever.app
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -16,9 +19,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,10 +73,23 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
+// ✅ عتبة اعتبار الشاشة "جهاز لوحي" + أقصى عرض للمحتوى على الشاشات الكبيرة
+private val TABLET_BREAKPOINT = 600.dp
+private val DETAILS_MAX_WIDTH = 800.dp
+
 val CairoBold = FontFamily(Font(R.font.cairo_bold, FontWeight.Bold))
 val CairoLight = FontFamily(Font(R.font.cairo_light, FontWeight.Light))
 
 private fun img(path: String?, size: String = "w500"): String? = path?.let { "$IMG$size$it" }
+
+private fun Context.findActivity(): Activity? {
+    var ctx: Context = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 private data class DetailsUi(
     val title: String,
@@ -82,7 +101,7 @@ private data class DetailsUi(
     val seasons: List<Season>? = null
 )
 
-private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
+private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi = withContext(Dispatchers.IO) {
     val api = TMDBApi.create()
     var title = ""
     var overview = ""
@@ -125,7 +144,7 @@ private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi {
 
     if (overview.isBlank()) overview = "لا توجد قصة متاحة حالياً."
 
-    return DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
+    DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
 }
 
 private suspend fun extractColor(context: Context, url: String?): Color? {
@@ -171,6 +190,27 @@ fun DetailsScreen(
         var selectedEpisodeNumber by remember { mutableIntStateOf(initialEpisode) }
         val sheetState = rememberModalBottomSheetState()
 
+        // ✅ حالتان منفصلتان لمنع تداخل الإعلانات لنفس العمل:
+        // - hasShownAdForCurrentMedia: شاهد إعلاناً بينياً (سيرفر 2/3/4) أو أُعفي منه.
+        // - isVipUnlockedForCurrentMedia: فتح السيرفر VIP بإعلان مكافأة أو أُعفي منه.
+        // إذا تحقق أيٌّ منهما، لا يُطلب من المستخدم أي إعلان إضافي لباقي السيرفرات لنفس العمل.
+        var hasShownAdForCurrentMedia by rememberSaveable(movieId, mediaType) { mutableStateOf(false) }
+        var isVipUnlockedForCurrentMedia by rememberSaveable(movieId, mediaType) { mutableStateOf(false) }
+
+        // ✅ (نقطة 4) نظام المفضلة: تهيئة + مراقبة الحالة الحيّة
+        LaunchedEffect(Unit) {
+            UnityAdsManager.initialize(context)
+            FavoritesManager.init(context)
+        }
+        val favoritesList by FavoritesManager.favorites.collectAsState()
+        val isFavorite = remember(favoritesList, movieId, mediaType) {
+            favoritesList.any { it.id == movieId && it.type == mediaType }
+        }
+        fun toggleFavorite() {
+            val d = ui ?: return
+            FavoritesManager.toggle(context, FavoriteItem(movieId, d.title, mediaType, d.posterPath))
+        }
+
         LaunchedEffect(movieId, mediaType, reloadKey) {
             error = false
             try {
@@ -205,6 +245,69 @@ fun DetailsScreen(
             episodes = List(season.episodeCount ?: 1) { Episode(it + 1, "الحلقة ${it + 1}", "") }
         }
 
+        // ✅ (منطق الإعلانات الجديد) السيرفر الأول (VIP) يستخدم إعلان مكافأة إجباري الاكتمال؛
+        // السيرفرات 2/3/4 تستخدم الإعلان البيني القديم. كلاهما يُعفي الآخر لنفس العمل كي لا
+        // يُجبر المستخدم على مشاهدة إعلانين للفيلم/المسلسل نفسه.
+        fun openServer(index: Int) {
+            val currentTitle = ui?.title ?: ""
+            val currentPoster = ui?.posterPath
+            val seasonNumber = selectedSeason?.seasonNumber ?: 1
+            val episodeNumber = selectedEpisodeNumber
+
+            val proceed = {
+                HistoryManager.addToHistory(
+                    context,
+                    WatchHistory(movieId, currentTitle, mediaType, currentPoster, seasonNumber, episodeNumber)
+                )
+                onPlayClick(movieId, mediaType, currentTitle, seasonNumber, episodeNumber, index)
+            }
+
+            if (index == 0) {
+                // --- السيرفر الأول (VIP) ---
+                if (isVipUnlockedForCurrentMedia || hasShownAdForCurrentMedia) {
+                    // سبق أن شاهد إعلاناً (أياً كان نوعه) لهذا العمل تحديداً
+                    proceed()
+                } else {
+                    UnityAdsManager.showRewardedAd(context.findActivity()) { success, failedToLoad ->
+                        when {
+                            success -> {
+                                isVipUnlockedForCurrentMedia = true
+                                hasShownAdForCurrentMedia = true
+                                proceed()
+                            }
+                            failedToLoad -> {
+                                // لا يوجد إعلان متاح حالياً => مكافأة مجانية كي لا يُحرم المستخدم من المشاهدة
+                                isVipUnlockedForCurrentMedia = true
+                                hasShownAdForCurrentMedia = true
+                                proceed()
+                            }
+                            else -> {
+                                // أغلق الإعلان مبكراً قبل اكتماله => لا يفتح السيرفر
+                                Toast.makeText(
+                                    context,
+                                    "يجب مشاهدة الإعلان بالكامل لفتح السيرفر VIP",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            } else {
+                // --- السيرفرات 2 / 3 / 4 ---
+                if (hasShownAdForCurrentMedia || isVipUnlockedForCurrentMedia) {
+                    proceed()
+                } else {
+                    UnityAdsManager.showInterstitial(context.findActivity()) { shown ->
+                        if (shown) {
+                            hasShownAdForCurrentMedia = true
+                            isVipUnlockedForCurrentMedia = true
+                        }
+                        proceed()
+                    }
+                }
+            }
+        }
+
         val top by animateColorAsState(
             accent?.let { lerpColor(it, Color.Black, 0.3f) } ?: DefaultTop, tween(700), label = "top"
         )
@@ -212,23 +315,45 @@ fun DetailsScreen(
             accent?.let { lerpColor(it, Ink, 0.88f) } ?: Ink, tween(700), label = "bottom"
         )
 
-        Box(
+        // ✅ (دعم الأجهزة اللوحية) BoxWithConstraints لمعرفة عرض الشاشة.
+        // على الجوال (isTablet=false) السلوك مطابق 100% للأصل: Box(fillMaxSize) يحوي DetailsBody مباشرة.
+        BoxWithConstraints(
             Modifier
                 .fillMaxSize()
                 .background(Brush.verticalGradient(listOf(top, bottom)))
         ) {
+            val isTablet = maxWidth >= TABLET_BREAKPOINT
             val d = ui
             when {
-                // ✅ جديد: commentsContent يضيف قسم التعليقات أسفل الصفحة (لا تغيير في باقي المنطق)
-                d != null -> DetailsBody(d, commentsContent = { CommentSection(movieId, mediaType) }) {
-                    if (mediaType == "tv") {
-                        if (autoShowServers) {
-                            showServerSheet = true
-                        } else {
-                            showSeasonSheet = true
+                d != null -> {
+                    Box(Modifier.fillMaxSize()) {
+                        Box(
+                            if (isTablet) {
+                                Modifier
+                                    .align(Alignment.TopCenter)
+                                    .widthIn(max = DETAILS_MAX_WIDTH)
+                                    .fillMaxHeight()
+                            } else {
+                                Modifier.fillMaxSize()
+                            }
+                        ) {
+                            DetailsBody(
+                                d = d,
+                                isFavorite = isFavorite,
+                                onToggleFavorite = { toggleFavorite() },
+                                commentsContent = { CommentSection(movieId, mediaType) }
+                            ) {
+                                if (mediaType == "tv") {
+                                    if (autoShowServers) {
+                                        showServerSheet = true
+                                    } else {
+                                        showSeasonSheet = true
+                                    }
+                                } else {
+                                    showServerSheet = true
+                                }
+                            }
                         }
-                    } else {
-                        showServerSheet = true
                     }
                 }
                 error -> Column(
@@ -317,13 +442,7 @@ fun DetailsScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             servers.take(2).forEach { (name, index) ->
                                 Button(
-                                    onClick = {
-                                        HistoryManager.addToHistory(
-                                            context,
-                                            WatchHistory(movieId, ui?.title ?: "", mediaType, ui?.posterPath, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber)
-                                        )
-                                        onPlayClick(movieId, mediaType, ui?.title ?: "", selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, index)
-                                    },
+                                    onClick = { openServer(index) },
                                     modifier = Modifier.weight(1f).height(60.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                     shape = RoundedCornerShape(30.dp)
@@ -332,7 +451,6 @@ fun DetailsScreen(
                                         Text(name, color = Color.Black, fontWeight = FontWeight.Bold)
                                         if (index == 0) {
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            // ✅ شعار VIP الذهبي
                                             Text(
                                                 "👑 VIP",
                                                 color = Color(0xFFFFD700),
@@ -351,13 +469,7 @@ fun DetailsScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             servers.drop(2).forEach { (name, index) ->
                                 Button(
-                                    onClick = {
-                                        HistoryManager.addToHistory(
-                                            context,
-                                            WatchHistory(movieId, ui?.title ?: "", mediaType, ui?.posterPath, selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber)
-                                        )
-                                        onPlayClick(movieId, mediaType, ui?.title ?: "", selectedSeason?.seasonNumber ?: 1, selectedEpisodeNumber, index)
-                                    },
+                                    onClick = { openServer(index) },
                                     modifier = Modifier.weight(1f).height(60.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                                     shape = RoundedCornerShape(30.dp)
@@ -387,13 +499,19 @@ private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun DetailsBody(d: DetailsUi, commentsContent: @Composable () -> Unit, onPlay: () -> Unit) {
+private fun DetailsBody(
+    d: DetailsUi,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    commentsContent: @Composable () -> Unit,
+    onPlay: () -> Unit
+) {
     var expanded by remember { mutableStateOf(false) }
     val year = d.date?.take(4)?.takeIf { it.length == 4 }
     val rating = d.rating?.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }
     val overview = d.overview.ifBlank { "لا توجد قصة متاحة حالياً." }
+    val badge = remember(d) { computeBadge(d.date, d.overview) }
 
-    // imePadding: يرفع المحتوى فوق الكيبورد عند كتابة تعليق (لا أثر بصري بدون الكيبورد)
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
         Box(Modifier.fillMaxWidth()) {
             AsyncImage(
@@ -417,6 +535,10 @@ private fun DetailsBody(d: DetailsUi, commentsContent: @Composable () -> Unit, o
                     Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent))
                 )
             )
+
+            badge?.let {
+                BadgeLabel(it, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp))
+            }
 
             Column(
                 Modifier
@@ -456,14 +578,37 @@ private fun DetailsBody(d: DetailsUi, commentsContent: @Composable () -> Unit, o
                     year?.let { MetaChip(it, Color.White) }
                 }
 
-                Button(
-                    onClick = onPlay,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                    modifier = Modifier.padding(top = 20.dp).fillMaxWidth().height(52.dp)
+                // ✅ زر "شاهد الآن" + زر المفضلة بجانبه (صح عند الإضافة / + عند عدم الإضافة)
+                Row(
+                    Modifier.padding(top = 20.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Outlined.PlayArrow, null)
-                    Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Button(
+                        onClick = onPlay,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Icon(Icons.Outlined.PlayArrow, null)
+                        Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    }
+
+                    val favShape = RoundedCornerShape(8.dp)
+                    Box(
+                        Modifier
+                            .size(52.dp)
+                            .clip(favShape)
+                            .background(if (isFavorite) Pink.copy(alpha = 0.22f) else GlassFill)
+                            .border(1.dp, if (isFavorite) Pink else GlassStroke, favShape)
+                            .clickable(onClick = onToggleFavorite),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (isFavorite) Icons.Outlined.Check else Icons.Outlined.Add,
+                            contentDescription = if (isFavorite) "في قائمتي" else "أضف لقائمتي",
+                            tint = if (isFavorite) Pink else Color.White
+                        )
+                    }
                 }
 
                 val shape = RoundedCornerShape(16.dp)
@@ -501,7 +646,6 @@ private fun DetailsBody(d: DetailsUi, commentsContent: @Composable () -> Unit, o
                     }
                 }
 
-                // ✅ جديد: قسم التعليقات أسفل صفحة التفاصيل
                 Spacer(modifier = Modifier.height(28.dp))
                 commentsContent()
             }

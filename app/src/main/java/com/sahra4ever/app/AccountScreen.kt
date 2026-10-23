@@ -57,6 +57,8 @@ fun AccountScreen(
         val scope = rememberCoroutineScope()
         val user by AuthManager.user.collectAsState()
         var showAuth by remember { mutableStateOf(false) }
+        // ✅ (نقطة 7) حالة نافذة تأكيد المسح
+        var showClearCacheDialog by remember { mutableStateOf(false) }
         val version = remember { appVersion(context) }
 
         Column(
@@ -117,7 +119,7 @@ fun AccountScreen(
                         ) { Text("تسجيل الدخول", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
                     } else {
                         Button(
-                            onClick = { scope.launch { AuthManager.signOut() } }, // ✅ تم إصلاح هذا السطر
+                            onClick = { scope.launch { AuthManager.signOut() } },
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f), contentColor = Color.White),
                             modifier = Modifier.fillMaxWidth().height(50.dp)
@@ -129,18 +131,12 @@ fun AccountScreen(
                     }
                 }
 
+                // ✅ (نقطة 5) يفتح شاشة MyListScreen الآن مباشرة (يتم تمريرها من MainActivity)
                 SettingsItem(Icons.Outlined.FavoriteBorder, "قائمتي / المفضلة", onClick = onFavoritesClick)
 
+                // ✅ (نقطة 7) يفتح نافذة تأكيد بدلاً من المسح الفوري
                 SettingsItem(Icons.Outlined.DeleteSweep, "مسح الذاكرة المؤقتة (Clear Cache)") {
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            try {
-                                context.imageLoader.memoryCache?.clear()
-                                context.imageLoader.diskCache?.clear()
-                            } catch (e: Exception) {}
-                        }
-                        Toast.makeText(context, "تم مسح الذاكرة المؤقتة", Toast.LENGTH_SHORT).show()
-                    }
+                    showClearCacheDialog = true
                 }
 
                 SettingsItem(Icons.Outlined.Info, "رقم الإصدار", value = "Version $version")
@@ -161,6 +157,35 @@ fun AccountScreen(
         }
 
         if (showAuth) AuthSheet(onDismiss = { showAuth = false })
+
+        // ✅ (نقطة 7) نافذة تأكيد المسح
+        if (showClearCacheDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearCacheDialog = false },
+                title = { Text("تأكيد المسح", fontWeight = FontWeight.Bold) },
+                text = { Text("هل أنت متأكد من مسح ذاكرة التطبيق المؤقتة؟") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showClearCacheDialog = false
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                try {
+                                    context.imageLoader.memoryCache?.clear()
+                                    context.imageLoader.diskCache?.clear()
+                                } catch (e: Exception) {}
+                            }
+                            Toast.makeText(context, "تم مسح الذاكرة المؤقتة", Toast.LENGTH_SHORT).show()
+                        }
+                    }) { Text("نعم", color = Pink, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearCacheDialog = false }) { Text("إلغاء") }
+                },
+                containerColor = Color(0xFF1E1E2E),
+                titleContentColor = Color.White,
+                textContentColor = Muted
+            )
+        }
     }
 }
 

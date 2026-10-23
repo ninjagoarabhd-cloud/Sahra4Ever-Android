@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalFoundationApi::class, FlowPreview::class) // ✅ السطر السحري هنا
+@file:OptIn(ExperimentalFoundationApi::class, FlowPreview::class)
 
 package com.sahra4ever.app
 
@@ -85,6 +85,9 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
+// ✅ عتبة اعتبار الشاشة "جهاز لوحي" (Medium/Expanded) — لا تؤثر إطلاقاً على عرض الجوال العادي
+private val TABLET_BREAKPOINT = 600.dp
+
 private val CHIPS = listOf("أفلام", "مسلسلات", "أكشن وحركة", "دراما", "خيال علمي", "كوميدي", "مغامرة", "رعب")
 
 private val HeroTitleStyle = TextStyle(
@@ -99,13 +102,6 @@ private val HeroTitleStyle = TextStyle(
 private val BrandBrush = Brush.horizontalGradient(listOf(Purple, Pink))
 private val HeroScrim = Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))
 private val CardScrim = Brush.verticalGradient(0.3f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))
-
-private val NavItems = listOf(
-    "الرئيسية" to Icons.Outlined.Home,
-    "بحث" to Icons.Outlined.Search,
-    "ادعمنا" to Icons.Outlined.FavoriteBorder,
-    "حسابي" to Icons.Outlined.Person
-)
 
 @Immutable
 private data class HomeData(
@@ -153,17 +149,17 @@ private suspend fun fetchHome(): HomeData = coroutineScope {
 private fun progressOf(item: WatchHistory): Float = 0.4f
 private fun PagerState.offsetFor(page: Int): Float = ((currentPage - page) + currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
 
+private fun Movie.contentBadge(): ContentBadge? = computeBadge(releaseDate ?: firstAirDate, overview)
+
 @Composable
 fun HomeScreen(
     onMovieClick: (Int, String, String) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
     onCategoryClick: (String) -> Unit,
-    onSearchClick: () -> Unit,
-    onSupportClick: () -> Unit = {},
-    onAccountClick: () -> Unit = {}
+    onMyListClick: () -> Unit = {}
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        HomeContent(onMovieClick, onContinueWatchingClick, onCategoryClick, onSearchClick, onSupportClick, onAccountClick)
+        HomeContent(onMovieClick, onContinueWatchingClick, onCategoryClick, onMyListClick)
     }
 }
 
@@ -172,9 +168,7 @@ private fun HomeContent(
     onMovieClick: (Int, String, String) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
     onCategoryClick: (String) -> Unit,
-    onSearchClick: () -> Unit,
-    onSupportClick: () -> Unit,
-    onAccountClick: () -> Unit
+    onMyListClick: () -> Unit
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
@@ -190,8 +184,12 @@ private fun HomeContent(
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
-    var tab by remember { mutableIntStateOf(0) }
     val colors = remember { mutableStateMapOf<Int, Color>() }
+
+    // ✅ تهيئة نظام المفضلة مبكراً (آمنة للاستدعاء المتكرر)
+    LaunchedEffect(Unit) {
+        FavoritesManager.init(context)
+    }
 
     LaunchedEffect(Unit) {
         history = withContext(Dispatchers.IO) {
@@ -264,16 +262,20 @@ private fun HomeContent(
         { m: Movie -> onMovieClick(m.id, m.mediaType ?: "movie", m.displayTitle()) }
     }
 
-    Box(Modifier.fillMaxSize().background(Ink)) {
+    // ✅ (دعم الأجهزة اللوحية) BoxWithConstraints يسمح بمعرفة عرض الشاشة الفعلي
+    // دون أي تأثير على تصميم الجوال (isTablet = false يحافظ على نفس القيم الأصلية تماماً)
+    BoxWithConstraints(Modifier.fillMaxSize().background(Ink)) {
+        val isTablet = maxWidth >= TABLET_BREAKPOINT
+
         AmbientBackground(heroes, pagerState, colors, Modifier.fillMaxSize())
 
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Header()
+            Header(onMyListClick = onMyListClick)
             SearchBar(query, { query = it }, focusRequester)
             Spacer(Modifier.height(8.dp))
 
             when {
-                query.isNotBlank() -> SearchResults(results, searching, movieClick)
+                query.isNotBlank() -> SearchResults(results, searching, movieClick, isTablet)
                 loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Pink) }
                 error -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("تعذّر تحميل البيانات", color = Color.White, fontSize = 16.sp)
@@ -283,22 +285,11 @@ private fun HomeContent(
                 else -> HomeFeed(
                     heroes = heroes, rest = rest, nowPlaying = home.nowPlaying, airing = home.airing, anime = home.anime,
                     history = history, pagerState = pagerState, listState = listState,
-                    onChip = onCategoryClick, onMovieClick = movieClick, onContinue = onContinueWatchingClick
+                    onChip = onCategoryClick, onMovieClick = movieClick, onContinue = onContinueWatchingClick,
+                    isTablet = isTablet
                 )
             }
         }
-
-        BottomNav(
-            selected = tab,
-            onSelect = { i ->
-                tab = i
-                if (i == 1) onSearchClick()
-                if (i == 0) focusRequester.requestFocus()
-                if (i == 2) onSupportClick()
-                if (i == 3) onAccountClick()
-            },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
     }
 }
 
@@ -310,18 +301,51 @@ private fun AmbientBackground(heroes: List<Movie>, pagerState: PagerState, color
     Box(modifier.drawBehind { drawRect(Brush.verticalGradient(listOf(top, bottom))) })
 }
 
+/** ✅ (نقطة 3) الشريط العلوي الجديد: اللوغو + (صورة الحساب واسمه) + زر قائمتي — بدون جرس/تحميل/Cast */
 @Composable
-private fun Header() {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+private fun Header(onMyListClick: () -> Unit) {
+    val user by AuthManager.user.collectAsState()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Image(
             painter = painterResource(id = R.drawable.logo),
             contentDescription = "Sahra4Ever Logo",
-            modifier = Modifier.height(40.dp)
+            modifier = Modifier.height(34.dp)
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Icon(Icons.Outlined.Cast, "بث", tint = Color.White, modifier = Modifier.height(24.dp))
-            Icon(Icons.Outlined.Download, "تحميل", tint = Color.White, modifier = Modifier.height(24.dp))
-            Icon(Icons.Outlined.Notifications, "تنبيهات", tint = Color.White, modifier = Modifier.height(24.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                UserAvatar(
+                    name = user?.name ?: GUEST_NAME,
+                    photoUrl = user?.photoUrl,
+                    size = 34.dp,
+                    showInitial = user != null
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    user?.name ?: GUEST_NAME,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 90.dp)
+                )
+            }
+
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .background(GlassFill)
+                    .border(1.dp, GlassStroke, CircleShape)
+                    .clickable(onClick = onMyListClick)
+                    .padding(8.dp)
+            ) {
+                Icon(Icons.Outlined.FavoriteBorder, "قائمتي", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
         }
     }
 }
@@ -346,9 +370,10 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
 private fun HomeFeed(
     heroes: List<Movie>, rest: List<Movie>, nowPlaying: List<Movie>, airing: List<Movie>, anime: List<Movie>,
     history: List<WatchHistory>, pagerState: PagerState, listState: LazyListState,
-    onChip: (String) -> Unit, onMovieClick: (Movie) -> Unit, onContinue: (WatchHistory) -> Unit
+    onChip: (String) -> Unit, onMovieClick: (Movie) -> Unit, onContinue: (WatchHistory) -> Unit,
+    isTablet: Boolean
 ) {
-    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 110.dp)) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "chips", contentType = "chips") { Chips(onChip) }
         if (heroes.isNotEmpty()) {
             item(key = "hero", contentType = "hero") {
@@ -381,20 +406,24 @@ private fun HomeFeed(
                 }
             }
         }
-        movieRow("trending", "الترند الآن", rest, onMovieClick)
-        movieRow("now", "وصل حديثاً للسينما", nowPlaying, onMovieClick)
-        movieRow("airing", "جديد المسلسلات", airing, onMovieClick)
-        movieRow("anime", "عالم الأنمي", anime, onMovieClick)
+        movieRow("trending", "الترند الآن", rest, onMovieClick, isTablet)
+        movieRow("now", "وصل حديثاً للسينما", nowPlaying, onMovieClick, isTablet)
+        movieRow("airing", "جديد المسلسلات", airing, onMovieClick, isTablet)
+        movieRow("anime", "عالم الأنمي", anime, onMovieClick, isTablet)
     }
 }
 
-private fun LazyListScope.movieRow(id: String, title: String, list: List<Movie>, onClick: (Movie) -> Unit) {
+/** ✅ (دعم الأجهزة اللوحية) عرض كرت أكبر قليلاً + تباعد أوسع فقط عندما isTablet=true؛
+ * على الجوال (isTablet=false) القيم مطابقة تماماً للأصل (120.dp / 8.dp). */
+private fun LazyListScope.movieRow(id: String, title: String, list: List<Movie>, onClick: (Movie) -> Unit, isTablet: Boolean) {
     if (list.isEmpty()) return
     item(key = "$id-title", contentType = "title") { SectionTitle(title) }
     item(key = "$id-row", contentType = "row") {
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val cardWidth = if (isTablet) 168.dp else 120.dp
+        val spacing = if (isTablet) 14.dp else 8.dp
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(spacing)) {
             items(list, key = { "${it.mediaType}-${it.id}" }, contentType = { "poster" }) { m ->
-                PosterCard(m, Modifier.width(120.dp)) { onClick(m) }
+                PosterCard(m, Modifier.width(cardWidth)) { onClick(m) }
             }
         }
     }
@@ -417,8 +446,10 @@ private fun Chips(onSelect: (String) -> Unit) {
     }
 }
 
+/** ✅ (نقطة 2) زر "قائمتي" أصبح فعّالاً بالكامل: يبدّل بين + و ✓ ويضيف/يحذف من المفضلة فوراً */
 @Composable
 private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val shape = RoundedCornerShape(16.dp)
     val tags = remember(movie) {
         listOfNotNull(
@@ -426,6 +457,14 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifi
             movie.voteAverage?.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }
         ).joinToString("  •  ")
     }
+    val badge = remember(movie) { movie.contentBadge() }
+
+    val favoritesList by FavoritesManager.favorites.collectAsState()
+    val mediaType = movie.mediaType ?: "movie"
+    val isFavorite = remember(favoritesList, movie.id, mediaType) {
+        favoritesList.any { it.id == movie.id && it.type == mediaType }
+    }
+
     Box(
         modifier
             .fillMaxWidth()
@@ -440,13 +479,37 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifi
     ) {
         AsyncImage(model = tmdbImg(movie.posterPath, "w780") ?: tmdbImg(movie.backdropPath, "w780"), contentDescription = movie.displayTitle(), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(HeroScrim))
+
+        badge?.let {
+            BadgeLabel(it, Modifier.align(Alignment.TopStart).padding(12.dp))
+        }
+
         Column(Modifier.align(Alignment.BottomCenter).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(movie.displayTitle(), style = HeroTitleStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Box(Modifier.padding(top = 10.dp).width(44.dp).height(3.dp).clip(CircleShape).background(BrandBrush))
             Text(tags, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp, bottom = 14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onClick, shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black), modifier = Modifier.weight(1f).height(48.dp)) { Icon(Icons.Outlined.PlayArrow, null); Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
-                Button(onClick = { }, shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f), contentColor = Color.White), modifier = Modifier.weight(1f).height(48.dp)) { Icon(Icons.Outlined.Add, null); Text(" قائمتي", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+                Button(onClick = onClick, shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black), modifier = Modifier.weight(1f).height(48.dp)) {
+                    Icon(Icons.Outlined.PlayArrow, null)
+                    Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                Button(
+                    onClick = {
+                        FavoritesManager.toggle(
+                            context,
+                            FavoriteItem(movie.id, movie.displayTitle(), mediaType, movie.posterPath)
+                        )
+                    },
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isFavorite) Pink.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.15f),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                    Icon(if (isFavorite) Icons.Outlined.Check else Icons.Outlined.Add, null)
+                    Text(" قائمتي", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
@@ -483,19 +546,33 @@ private fun ContinueCard(item: WatchHistory, onClick: () -> Unit) {
 
 @Composable
 private fun PosterCard(movie: Movie, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val badge = remember(movie) { movie.contentBadge() }
+
     Column(modifier.clickable(onClick = onClick)) {
-        AsyncImage(model = tmdbImg(movie.posterPath, "w342"), contentDescription = movie.displayTitle(), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)))
+        Box {
+            AsyncImage(
+                model = tmdbImg(movie.posterPath, "w342"),
+                contentDescription = movie.displayTitle(),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f))
+            )
+            badge?.let {
+                BadgeLabel(it, Modifier.align(Alignment.TopStart).padding(6.dp))
+            }
+        }
         Text(movie.displayTitle(), color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
+/** ✅ (دعم الأجهزة اللوحية) عدد أعمدة الشبكة يزداد على الشاشات الكبيرة فقط؛
+ * على الجوال يبقى 3 أعمدة تماماً كما كان. */
 @Composable
-private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick: (Movie) -> Unit) {
+private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick: (Movie) -> Unit, isTablet: Boolean) {
     Box(Modifier.fillMaxSize()) {
         when {
             results.isNotEmpty() -> LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 110.dp),
+                columns = GridCells.Fixed(if (isTablet) 5 else 3),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
@@ -506,20 +583,6 @@ private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick
         }
         if (searching && results.isNotEmpty()) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter), color = Pink, trackColor = Color.Transparent)
-        }
-    }
-}
-
-@Composable
-private fun BottomNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-    Row(modifier.fillMaxWidth().clip(shape).background(Ink.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.08f), shape).navigationBarsPadding().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceAround) {
-        NavItems.forEachIndexed { i, (label, icon) ->
-            val tint = if (i == selected) Color.White else Color(0xFFA9A8B4)
-            Column(Modifier.clip(RoundedCornerShape(12.dp)).clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(icon, label, tint = tint)
-                Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
         }
     }
 }

@@ -45,7 +45,8 @@ private val GlassFill = Color.White.copy(alpha = 0.10f)
 private val GlassStroke = Color.White.copy(alpha = 0.20f)
 private val Muted = Color(0xFFD0CFDA)
 
-private const val DONATION_URL = "https://example.com/support" // ضع رابط الدعم هنا
+// ✅ (تعديل جديد) رابط الدعم المادي الفعلي عبر Ko-fi
+private const val DONATION_URL = "https://ko-fi.com/sahra4ever"
 private const val TELEGRAM_URL = "https://t.me/Sahra4Ever"
 private const val SHARE_TEXT =
     "🎬 جرّب تطبيق سهرة فور إيفر — أفلام ومسلسلات وأنمي بتجربة مشاهدة ممتعة ومجانية!\n" +
