@@ -27,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -78,17 +79,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** ✅ (نقطة 6) المسارات التي يجب أن يختفي فيها الشريط السفلي تماماً. */
+/** ✅ المسارات التي يجب أن يختفي فيها الشريط السفلي تماماً. */
 private fun shouldHideBottomBar(route: String?): Boolean {
     if (route == null) return false
     return route.startsWith("details") || route.startsWith("player") || route == "mylist"
 }
 
 /**
- * ✅ (نقطة 6) الحاوية الجذرية: Scaffold يحتوي NavHost + الشريط السفلي.
- * نمرر innerPadding مباشرة إلى NavHost (وليس لكل شاشة يدوياً) حتى تُحجز
- * المساحة تلقائياً فقط عندما يكون الشريط ظاهراً، ودون أي حاجة لتعديل تصميم
- * الشاشات الأخرى (Home/Search/Support/Account) يدوياً.
+ * ✅ الحاوية الجذرية: Scaffold يحتوي NavHost + الشريط السفلي.
  */
 @Composable
 private fun AppRoot() {
@@ -177,7 +175,6 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             )
         }
         composable("mylist") {
-            // ✅ (نقطة 1-ب) شاشة قائمتي الجديدة
             MyListScreen(
                 onBack = { navController.popBackStack() },
                 onMovieClick = { id, type, title ->
@@ -191,7 +188,6 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         composable("account") {
             AccountScreen(
                 onBack = { navController.popBackStack() },
-                // ✅ (نقطة 5) تفتح شاشة قائمتي مباشرة بدلاً من Toast
                 onFavoritesClick = {
                     navController.navigate("mylist")
                 }
