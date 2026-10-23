@@ -268,7 +268,7 @@ fun DetailsScreen(
                     // سبق أن شاهد إعلاناً (أياً كان نوعه) لهذا العمل تحديداً
                     proceed()
                 } else {
-                    UnityAdsManager.showRewardedAd(context.findActivity()) { success, failedToLoad ->
+                    UnityAdsManager.showRewardedAd(context.findActivity()) { success: Boolean, failedToLoad: Boolean ->
                         when {
                             success -> {
                                 isVipUnlockedForCurrentMedia = true
