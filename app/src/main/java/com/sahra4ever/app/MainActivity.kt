@@ -53,17 +53,8 @@ private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
     Triple("حسابي", Icons.Outlined.Person, "account")
 )
 
-// ✅ قيمة سنتينل تُستخدم لتمثيل "لا توجد قيمة" داخل مسار التنقل (مسارات Compose Navigation
-// لا تدعم null مباشرة لـ StringType بدون تعقيد زائد). posterPath/backdropPath الحقيقية
-// من TMDB تبدأ دائماً بـ "/" ولا يمكن أبداً أن تساوي "null" حرفياً، لذا السنتينل آمن تماماً.
 private const val NULL_SENTINEL = "null"
 
-/**
- * ✅ (تمرير البيانات الأولية / Optimistic UI) دالة مركزية واحدة لبناء رابط شاشة التفاصيل،
- * تُستخدم من كل نقاط الدخول (الرئيسية، متابعة المشاهدة، قائمتي، البحث) لضمان شكل موحّد للمسار.
- * عند غياب poster/backdrop/vote (كما في المسارات القادمة من MyListScreen/SearchScreen التي
- * لا تملك هذه البيانات حالياً) تُستخدم القيم الافتراضية بأمان دون أي تأثير على عملها الحالي.
- */
 private fun buildDetailsRoute(
     movieId: Int,
     mediaType: String,
@@ -86,7 +77,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                // rememberSaveable: لا يعيد السبلاش عند تدوير الشاشة
                 var showSplash by rememberSaveable { mutableStateOf(true) }
                 Crossfade(
                     targetState = showSplash,
@@ -103,30 +93,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ✅ تنظيف أي حالة إعلان معلّقة (Timeout أو isShowing) عند إغلاق النشاط نهائياً
     override fun onDestroy() {
         super.onDestroy()
         UnityAdsManager.reset()
     }
 }
 
-/** ✅ المسارات التي يجب أن يختفي فيها الشريط السفلي تماماً. */
 private fun shouldHideBottomBar(route: String?): Boolean {
     if (route == null) return false
     return route.startsWith("details") || route.startsWith("player") || route == "mylist"
 }
 
-/**
- * ✅ الحاوية الجذرية: Scaffold يحتوي NavHost + الشريط السفلي.
- * تم وضع CompositionLocalProvider هنا لضمان أن الشريط السفلي يترتب من اليمين لليسار.
- */
 @Composable
 private fun AppRoot() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    // ✅ هذا هو التعديل: إجبار الاتجاه على RTL
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(
             containerColor = Ink,
@@ -195,8 +178,6 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
     NavHost(navController = navController, startDestination = "home", modifier = modifier) {
         composable("home") {
             HomeScreen(
-                // ✅ (Optimistic UI) الآن يصل poster/backdrop/voteAverage مباشرة من كائن Movie
-                // في الشاشة الرئيسية، دون أي طلب شبكة إضافي، لتُستخدم كعرض أولي فوري في DetailsScreen
                 onMovieClick = { id, type, title, poster, backdrop, vote ->
                     navController.navigate(
                         buildDetailsRoute(
@@ -233,8 +214,18 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         composable("mylist") {
             MyListScreen(
                 onBack = { navController.popBackStack() },
-                onMovieClick = { id, type, title ->
-                    navController.navigate(buildDetailsRoute(movieId = id, mediaType = type, title = title))
+                // ✅ تم التعديل هنا: توحيد التوقيع مع onMovieClick الجديد في MyListScreen (6 متغيرات)
+                onMovieClick = { id, type, title, poster, backdrop, vote ->
+                    navController.navigate(
+                        buildDetailsRoute(
+                            movieId = id,
+                            mediaType = type,
+                            title = title,
+                            posterPath = poster,
+                            backdropPath = backdrop,
+                            voteAverage = vote
+                        )
+                    )
                 }
             )
         }
@@ -257,8 +248,17 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             SearchScreen(
                 initialCategory = category,
                 onBack = { navController.popBackStack() },
-                onMovieClick = { id, type, title ->
-                    navController.navigate(buildDetailsRoute(movieId = id, mediaType = type, title = title))
+                onMovieClick = { id, type, title, poster, backdrop, vote ->
+                    navController.navigate(
+                        buildDetailsRoute(
+                            movieId = id,
+                            mediaType = type,
+                            title = title,
+                            posterPath = poster,
+                            backdropPath = backdrop,
+                            voteAverage = vote
+                        )
+                    )
                 }
             )
         }

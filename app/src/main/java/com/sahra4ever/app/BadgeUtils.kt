@@ -16,7 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
-import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 
 enum class ContentBadge {
@@ -28,12 +28,33 @@ fun computeBadge(dateStr: String?, overview: String?): ContentBadge? {
     return null
 }
 
+/**
+ * ✅ (نسخة دفاعية أكثر متانة)
+ * - تُنظّف السلسلة (trim) وتأخذ أول 10 أحرف فقط (yyyy-MM-dd) حتى لو جاء التاريخ
+ *   بصيغة أطول (مثل وجود جزء وقت/منطقة زمنية إضافية في بعض استجابات TMDB النادرة)
+ *   بدل فشل الـ parse بصمت بسبب isLenient = false.
+ * - المقارنة تتم مع "بداية اليوم الحالي" (منتصف الليل) بدل اللحظة الحالية الدقيقة،
+ *   لضمان: فيلم يصدر اليوم بالضبط => غير قادم (متاح)، فيلم يصدر غدًا أو بعده => قادم،
+ *   بغض النظر عن الساعة الحالية وقت تشغيل التطبيق.
+ */
 private fun isFutureDate(dateStr: String?): Boolean {
-    if (dateStr.isNullOrBlank()) return false
+    val cleaned = dateStr?.trim()
+    if (cleaned.isNullOrBlank() || cleaned.length < 10) return false
+
     return try {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
-        val date = sdf.parse(dateStr) ?: return false
-        date.after(Date())
+        val datePart = cleaned.take(10) // "yyyy-MM-dd"
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        sdf.isLenient = false
+        val releaseDate = sdf.parse(datePart) ?: return false
+
+        val startOfToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+
+        releaseDate.after(startOfToday)
     } catch (e: Exception) {
         false
     }

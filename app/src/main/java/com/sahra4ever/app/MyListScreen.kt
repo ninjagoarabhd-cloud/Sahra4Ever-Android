@@ -36,7 +36,9 @@ private val Muted = Color(0xFFD0CFDA)
 @Composable
 fun MyListScreen(
     onBack: () -> Unit,
-    onMovieClick: (Int, String, String) -> Unit
+    // ✅ توحيد التوقيع مع HomeScreen/SearchScreen بـ 6 متغيرات لتفعيل نفس Optimistic UI
+    // في DetailsScreen ومنع أي تعارض بين نقاط الدخول المختلفة لنفس الشاشة.
+    onMovieClick: (Int, String, String, String?, String?, Double?) -> Unit
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         val context = LocalContext.current
@@ -83,7 +85,11 @@ fun MyListScreen(
                     items(favorites, key = { "${it.type}-${it.id}" }) { item ->
                         FavoritePosterCard(
                             item = item,
-                            onClick = { onMovieClick(item.id, item.type, item.title) },
+                            onClick = {
+                                // ✅ posterPath حقيقي (Optimistic UI جزئي)، backdrop/vote غير متوفرين
+                                // حالياً داخل FavoriteItem فمُرِّرا null بأمان دون أي تأثير على الاستقرار.
+                                onMovieClick(item.id, item.type, item.title, item.posterPath, null, null)
+                            },
                             onRemove = { FavoritesManager.remove(context, item.id, item.type) }
                         )
                     }

@@ -20,8 +20,8 @@ object UnityAdsManager {
     private const val INTERSTITIAL_PLACEMENT_ID = "BP_Interstitial_Android"
     private const val REWARDED_PLACEMENT_ID = "Rewarded_Android"
 
-    // ✅ تم التعديل هنا: تفعيل وضع الاختبار لتظهر الإعلانات التجريبية فوراً
-    private const val TEST_MODE = true 
+    // ✅ تم إيقاف وضع الاختبار للإطلاق الفعلي
+    private const val TEST_MODE = false 
 
     private const val SHOW_TIMEOUT_MS = 8_000L
 

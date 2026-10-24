@@ -42,21 +42,29 @@ private val Muted = Color(0xFFD0CFDA)
 
 private fun img(path: String?, size: String = "w342"): String? = path?.let { "https://image.tmdb.org/t/p/$size$it" }
 
+// ✅ إصلاح: تحديد mediaType الافتراضي الصحيح حسب التصنيف بدل افتراض "movie" دائماً،
+// لأن ردود TMDB لتصنيف "مسلسلات" (getPopularTvShows) لا تحتوي أبداً على حقل media_type.
+private fun defaultMediaTypeFor(category: String): String =
+    if (category == "مسلسلات") "tv" else "movie"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     initialCategory: String,
     onBack: () -> Unit,
-    onMovieClick: (Int, String, String) -> Unit
+    // ✅ إصلاح الـ Crash الجذري: توقيع موحّد بـ 6 متغيرات مطابق تماماً لـ HomeScreen،
+    // يمرر posterPath/backdropPath/voteAverage الحقيقية بدل null دائماً، لتفعيل
+    // Optimistic UI في DetailsScreen بنفس الطريقة تماماً القادمة من الرئيسية.
+    onMovieClick: (Int, String, String, String?, String?, Double?) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    
+
     var query by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(initialCategory) }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
-    
+
     var page by remember { mutableIntStateOf(1) }
     var isLastPage by remember { mutableStateOf(false) }
     var isLoadingMore by remember { mutableStateOf(false) }
@@ -65,9 +73,10 @@ fun SearchScreen(
 
     suspend fun fetchData(isLoadMore: Boolean = false) {
         if (isLoadMore) isLoadingMore = true else { isLoading = true; page = 1; isLastPage = false }
-        
+
         try {
-            val api = TMDBApi.create()
+            // ✅ استخدام العميل المشترك TmdbClient.api بدل TMDBApi.create() الباردة
+            val api = TmdbClient.api
             val response = if (query.isNotBlank()) {
                 api.searchMulti(API_KEY, query, page, "en-US")
             } else {
@@ -79,14 +88,14 @@ fun SearchScreen(
                     "خيال علمي" -> api.getTopRatedMoviesByGenre(API_KEY, "878", page = page, language = "en-US")
                     "كوميدي" -> api.getTopRatedMoviesByGenre(API_KEY, "35", page = page, language = "en-US")
                     "رعب" -> api.getTopRatedMoviesByGenre(API_KEY, "27", page = page, language = "en-US")
-                    else -> api.getTrendingToday(API_KEY, "en-US") 
+                    else -> api.getTrendingToday(API_KEY, "en-US")
                 }
             }
-            
+
             val newResults = response.results.filter { it.posterPath != null }
-            if (isLoadMore) results = results + newResults else results = newResults
+            results = if (isLoadMore) results + newResults else newResults
             isLastPage = response.results.isEmpty() || page >= 10
-            
+
         } catch (e: Exception) {
             if (!isLoadMore) results = emptyList()
         } finally {
@@ -96,7 +105,6 @@ fun SearchScreen(
     }
 
     LaunchedEffect(query, selectedCategory) {
-        // تأخير بسيط فقط عند الكتابة في البحث
         if (query.isNotBlank()) {
             delay(400)
         }
@@ -120,7 +128,7 @@ fun SearchScreen(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                placeholder = { Text("بحث", color = Muted) }, // ✅ تم تغيير النص هنا
+                placeholder = { Text("بحث", color = Muted) },
                 leadingIcon = { Icon(Icons.Outlined.Search, null, tint = Pink) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -154,9 +162,9 @@ fun SearchScreen(
                             .clip(RoundedCornerShape(20.dp))
                             .background(if (isSelected) Pink else Color.Transparent)
                             .border(1.dp, if (isSelected) Pink else Color.DarkGray, RoundedCornerShape(20.dp))
-                            .clickable { 
-                                query = "" 
-                                selectedCategory = cat 
+                            .clickable {
+                                query = ""
+                                selectedCategory = cat
                             }
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
@@ -190,10 +198,21 @@ fun SearchScreen(
                 ) {
                     items(results, key = { "${it.id}-${it.mediaType}" }) { movie ->
                         SearchMovieCard(movie) {
-                            onMovieClick(movie.id, movie.mediaType ?: "movie", movie.title ?: movie.name ?: "")
+                            // ✅ قيم آمنة قبل التمرير لمنع أي segment فارغ في route أو mediaType خاطئ
+                            val safeTitle = (movie.title ?: movie.name)
+                                ?.takeIf { it.isNotBlank() } ?: "بدون عنوان"
+                            val safeMediaType = movie.mediaType ?: defaultMediaTypeFor(selectedCategory)
+                            onMovieClick(
+                                movie.id,
+                                safeMediaType,
+                                safeTitle,
+                                movie.posterPath,
+                                movie.backdropPath,
+                                movie.voteAverage
+                            )
                         }
                     }
-                    
+
                     if (!isLastPage) {
                         item {
                             Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
@@ -201,7 +220,7 @@ fun SearchScreen(
                                     CircularProgressIndicator(color = Pink, modifier = Modifier.size(24.dp))
                                 } else {
                                     Button(
-                                        onClick = { 
+                                        onClick = {
                                             page++
                                             scope.launch { fetchData(isLoadMore = true) }
                                         },
@@ -234,22 +253,33 @@ fun SearchMovieCard(movie: Movie, onClick: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
-        
+
         Box(
             modifier = Modifier.fillMaxSize().background(
                 Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))
             )
         )
-        
-        Row(
-            modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
-                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+
+        // ✅ إضافة الشارة الحمراء "يعرض قريباً" فوق شارة التقييم مباشرة (TopStart)
+        // دون أي مساس بتصميم شارة التقييم الأصلية.
+        Column(
+            modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("★", color = Color.Yellow, fontSize = 12.sp)
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(String.format(java.util.Locale.US, "%.1f", movie.voteAverage ?: 0.0), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            val badge = computeBadge(movie.releaseDate ?: movie.firstAirDate, movie.overview)
+            if (badge != null) {
+                BadgeLabel(badge)
+            }
+            Row(
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("★", color = Color.Yellow, fontSize = 12.sp)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(String.format(java.util.Locale.US, "%.1f", movie.voteAverage ?: 0.0), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
         Text(
