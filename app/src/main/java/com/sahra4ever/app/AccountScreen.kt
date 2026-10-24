@@ -7,11 +7,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
@@ -33,6 +35,7 @@ import coil.imageLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 private val Pink = Color(0xFFFF2FA6)
 private val Ink = Color(0xFF0F0E14)
@@ -47,6 +50,31 @@ private fun appVersion(context: Context): String = try {
     "1.0.0"
 }
 
+private fun computeCacheSizeBytes(context: Context): Long {
+    return try {
+        var total = 0L
+        context.cacheDir?.let { dir ->
+            total += dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+        context.externalCacheDir?.let { dir ->
+            total += dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+        total
+    } catch (e: Exception) {
+        0L
+    }
+}
+
+private fun formatCacheSize(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format(Locale.US, "%.0f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return String.format(Locale.US, "%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(Locale.US, "%.2f GB", gb)
+}
+
 @Composable
 fun AccountScreen(
     onBack: () -> Unit,
@@ -57,9 +85,14 @@ fun AccountScreen(
         val scope = rememberCoroutineScope()
         val user by AuthManager.user.collectAsState()
         var showAuth by remember { mutableStateOf(false) }
-        // ✅ (نقطة 7) حالة نافذة تأكيد المسح
         var showClearCacheDialog by remember { mutableStateOf(false) }
+        var showEditNameDialog by remember { mutableStateOf(false) }
         val version = remember { appVersion(context) }
+
+        var cacheSizeBytes by remember { mutableStateOf(0L) }
+        LaunchedEffect(Unit) {
+            cacheSizeBytes = withContext(Dispatchers.IO) { computeCacheSizeBytes(context) }
+        }
 
         Column(
             Modifier
@@ -93,12 +126,35 @@ fun AccountScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     val u = user
-                    UserAvatar(
-                        name = u?.name ?: GUEST_NAME,
-                        photoUrl = u?.photoUrl,
-                        size = 88.dp,
-                        showInitial = u != null
-                    )
+
+                    Box {
+                        UserAvatar(
+                            name = u?.name ?: GUEST_NAME,
+                            photoUrl = u?.photoUrl,
+                            size = 88.dp,
+                            showInitial = u != null
+                        )
+                        if (u != null) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Pink)
+                                    .border(2.dp, Ink, CircleShape)
+                                    .clickable { showEditNameDialog = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Edit,
+                                    "تعديل الاسم",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(Modifier.height(12.dp))
                     Text(
                         u?.name ?: GUEST_NAME,
@@ -131,11 +187,13 @@ fun AccountScreen(
                     }
                 }
 
-                // ✅ (نقطة 5) يفتح شاشة MyListScreen الآن مباشرة (يتم تمريرها من MainActivity)
                 SettingsItem(Icons.Outlined.FavoriteBorder, "قائمتي / المفضلة", onClick = onFavoritesClick)
 
-                // ✅ (نقطة 7) يفتح نافذة تأكيد بدلاً من المسح الفوري
-                SettingsItem(Icons.Outlined.DeleteSweep, "مسح الذاكرة المؤقتة (Clear Cache)") {
+                SettingsItem(
+                    Icons.Outlined.DeleteSweep,
+                    "مسح الذاكرة المؤقتة (Clear Cache)",
+                    value = formatCacheSize(cacheSizeBytes)
+                ) {
                     showClearCacheDialog = true
                 }
 
@@ -158,7 +216,57 @@ fun AccountScreen(
 
         if (showAuth) AuthSheet(onDismiss = { showAuth = false })
 
-        // ✅ (نقطة 7) نافذة تأكيد المسح
+        if (showEditNameDialog && user != null) {
+            var nameInput by remember { mutableStateOf(user!!.name) }
+            var isSaving by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+
+            AlertDialog(
+                onDismissRequest = { if (!isSaving) showEditNameDialog = false },
+                title = { Text("تعديل الاسم", fontWeight = FontWeight.Bold) },
+                text = {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("الاسم الجديد") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Pink,
+                            unfocusedBorderColor = GlassStroke,
+                            cursorColor = Pink
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !isSaving && nameInput.isNotBlank(),
+                        onClick = {
+                            isSaving = true
+                            scope.launch {
+                                try {
+                                    AuthManager.updateProfile(nameInput.trim())
+                                    Toast.makeText(context, "تم تحديث الاسم بنجاح", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "فشل التحديث", Toast.LENGTH_SHORT).show()
+                                }
+                                isSaving = false
+                                showEditNameDialog = false
+                            }
+                        }
+                    ) { Text("حفظ", color = Pink, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { if (!isSaving) showEditNameDialog = false }) { Text("إلغاء") }
+                },
+                containerColor = Color(0xFF1E1E2E),
+                titleContentColor = Color.White,
+                textContentColor = Muted
+            )
+        }
+
         if (showClearCacheDialog) {
             AlertDialog(
                 onDismissRequest = { showClearCacheDialog = false },
@@ -172,9 +280,14 @@ fun AccountScreen(
                                 try {
                                     context.imageLoader.memoryCache?.clear()
                                     context.imageLoader.diskCache?.clear()
+                                    context.cacheDir?.deleteRecursively()
+                                    context.cacheDir?.mkdirs()
+                                    context.externalCacheDir?.deleteRecursively()
+                                    context.externalCacheDir?.mkdirs()
                                 } catch (e: Exception) {}
                             }
-                            Toast.makeText(context, "تم مسح الذاكرة المؤقتة", Toast.LENGTH_SHORT).show()
+                            cacheSizeBytes = withContext(Dispatchers.IO) { computeCacheSizeBytes(context) }
+                            Toast.makeText(context, "تم مسح الذاكرة المؤقتة بنجاح", Toast.LENGTH_SHORT).show()
                         }
                     }) { Text("نعم", color = Pink, fontWeight = FontWeight.Bold) }
                 },
