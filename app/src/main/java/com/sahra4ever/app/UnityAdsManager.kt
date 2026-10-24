@@ -46,7 +46,7 @@ object UnityAdsManager {
 
     /** تهيئة الـ SDK (آمنة للاستدعاء أكثر من مرة). */
     fun initialize(context: Context) {
-        if (UnityAds.isInitialized()) {
+        if (UnityAds.isInitialized) {
             loadAd()
             loadRewardedAd()
             return
@@ -79,7 +79,7 @@ object UnityAdsManager {
 
     /** تحميل إعلان بيني مسبقاً ليكون جاهزاً للعرض. */
     fun loadAd() {
-        if (!UnityAds.isInitialized() || isLoading || isLoaded) return
+        if (!UnityAds.isInitialized || isLoading || isLoaded) return
         isLoading = true
 
         UnityAds.load(
@@ -106,7 +106,7 @@ object UnityAdsManager {
 
     /** ✅ (جديد) تحميل إعلان المكافأة مسبقاً ليكون جاهزاً للعرض. */
     fun loadRewardedAd() {
-        if (!UnityAds.isInitialized() || isRewardedLoading || isRewardedLoaded) return
+        if (!UnityAds.isInitialized || isRewardedLoading || isRewardedLoaded) return
         isRewardedLoading = true
 
         UnityAds.load(
@@ -155,7 +155,7 @@ object UnityAdsManager {
         }
 
         // ✅ منع تداخل الإعلانات: لا نعرض إعلاناً بينياً إذا كان أي إعلان آخر (بيني أو مكافأة) معروضاً حالياً
-        if (!UnityAds.isInitialized() || !isLoaded || isShowing) {
+        if (!UnityAds.isInitialized || !isLoaded || isShowing) {
             initialize(activity)
             loadAd()
             finishOnce(false)
@@ -242,7 +242,7 @@ object UnityAdsManager {
         // ✅ منع تداخل الإعلانات: لا نعرض إعلان مكافأة إذا كان أي إعلان آخر معروضاً حالياً،
         // وإن لم يكن الإعلان جاهزاً (لم يُحمَّل بعد / فشل التحميل) نعتبرها "فشل تحميل" فوراً
         // كي تفتح الشاشة المستدعية السيرفر VIP مجاناً دون تعليق المستخدم.
-        if (!UnityAds.isInitialized() || !isRewardedLoaded || isShowing) {
+        if (!UnityAds.isInitialized || !isRewardedLoaded || isShowing) {
             initialize(activity)
             loadRewardedAd()
             finishOnce(false, true)
