@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,7 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -49,6 +52,34 @@ private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
     Triple("ادعمنا", Icons.Outlined.FavoriteBorder, "support"),
     Triple("حسابي", Icons.Outlined.Person, "account")
 )
+
+// ✅ قيمة سنتينل تُستخدم لتمثيل "لا توجد قيمة" داخل مسار التنقل (مسارات Compose Navigation
+// لا تدعم null مباشرة لـ StringType بدون تعقيد زائد). posterPath/backdropPath الحقيقية
+// من TMDB تبدأ دائماً بـ "/" ولا يمكن أبداً أن تساوي "null" حرفياً، لذا السنتينل آمن تماماً.
+private const val NULL_SENTINEL = "null"
+
+/**
+ * ✅ (تمرير البيانات الأولية / Optimistic UI) دالة مركزية واحدة لبناء رابط شاشة التفاصيل،
+ * تُستخدم من كل نقاط الدخول (الرئيسية، متابعة المشاهدة، قائمتي، البحث) لضمان شكل موحّد للمسار.
+ * عند غياب poster/backdrop/vote (كما في المسارات القادمة من MyListScreen/SearchScreen التي
+ * لا تملك هذه البيانات حالياً) تُستخدم القيم الافتراضية بأمان دون أي تأثير على عملها الحالي.
+ */
+private fun buildDetailsRoute(
+    movieId: Int,
+    mediaType: String,
+    title: String,
+    season: Int = 1,
+    episode: Int = 1,
+    autoPlay: Boolean = false,
+    posterPath: String? = null,
+    backdropPath: String? = null,
+    voteAverage: Double? = null
+): String {
+    val posterSeg = Uri.encode(posterPath ?: NULL_SENTINEL)
+    val backdropSeg = Uri.encode(backdropPath ?: NULL_SENTINEL)
+    val voteSeg = (voteAverage ?: 0.0).toString()
+    return "details/$movieId/$mediaType/${Uri.encode(title)}/$season/$episode/$autoPlay/$posterSeg/$backdropSeg/$voteSeg"
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,6 +118,7 @@ private fun shouldHideBottomBar(route: String?): Boolean {
 
 /**
  * ✅ الحاوية الجذرية: Scaffold يحتوي NavHost + الشريط السفلي.
+ * تم وضع CompositionLocalProvider هنا لضمان أن الشريط السفلي يترتب من اليمين لليسار.
  */
 @Composable
 private fun AppRoot() {
@@ -94,18 +126,21 @@ private fun AppRoot() {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    Scaffold(
-        containerColor = Ink,
-        bottomBar = {
-            if (!shouldHideBottomBar(currentRoute)) {
-                AppBottomNav(currentRoute = currentRoute, navController = navController)
+    // ✅ هذا هو التعديل: إجبار الاتجاه على RTL
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Scaffold(
+            containerColor = Ink,
+            bottomBar = {
+                if (!shouldHideBottomBar(currentRoute)) {
+                    AppBottomNav(currentRoute = currentRoute, navController = navController)
+                }
             }
+        ) { innerPadding ->
+            AppNavHost(
+                navController = navController,
+                modifier = Modifier.padding(innerPadding)
+            )
         }
-    ) { innerPadding ->
-        AppNavHost(
-            navController = navController,
-            modifier = Modifier.padding(innerPadding)
-        )
     }
 }
 
@@ -160,11 +195,32 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
     NavHost(navController = navController, startDestination = "home", modifier = modifier) {
         composable("home") {
             HomeScreen(
-                onMovieClick = { id, type, title ->
-                    navController.navigate("details/$id/$type/${Uri.encode(title)}/1/1/false")
+                // ✅ (Optimistic UI) الآن يصل poster/backdrop/voteAverage مباشرة من كائن Movie
+                // في الشاشة الرئيسية، دون أي طلب شبكة إضافي، لتُستخدم كعرض أولي فوري في DetailsScreen
+                onMovieClick = { id, type, title, poster, backdrop, vote ->
+                    navController.navigate(
+                        buildDetailsRoute(
+                            movieId = id,
+                            mediaType = type,
+                            title = title,
+                            posterPath = poster,
+                            backdropPath = backdrop,
+                            voteAverage = vote
+                        )
+                    )
                 },
                 onContinueWatchingClick = { historyItem ->
-                    navController.navigate("details/${historyItem.id}/${historyItem.type}/${Uri.encode(historyItem.title)}/${historyItem.season}/${historyItem.episode}/true")
+                    navController.navigate(
+                        buildDetailsRoute(
+                            movieId = historyItem.id,
+                            mediaType = historyItem.type,
+                            title = historyItem.title,
+                            season = historyItem.season,
+                            episode = historyItem.episode,
+                            autoPlay = true,
+                            posterPath = historyItem.posterPath
+                        )
+                    )
                 },
                 onCategoryClick = { category ->
                     navController.navigate("search/${Uri.encode(category)}")
@@ -178,7 +234,7 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             MyListScreen(
                 onBack = { navController.popBackStack() },
                 onMovieClick = { id, type, title ->
-                    navController.navigate("details/$id/$type/${Uri.encode(title)}/1/1/false")
+                    navController.navigate(buildDetailsRoute(movieId = id, mediaType = type, title = title))
                 }
             )
         }
@@ -202,19 +258,22 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
                 initialCategory = category,
                 onBack = { navController.popBackStack() },
                 onMovieClick = { id, type, title ->
-                    navController.navigate("details/$id/$type/${Uri.encode(title)}/1/1/false")
+                    navController.navigate(buildDetailsRoute(movieId = id, mediaType = type, title = title))
                 }
             )
         }
         composable(
-            route = "details/{movieId}/{mediaType}/{title}/{season}/{episode}/{autoPlay}",
+            route = "details/{movieId}/{mediaType}/{title}/{season}/{episode}/{autoPlay}/{poster}/{backdrop}/{vote}",
             arguments = listOf(
                 navArgument("movieId") { type = NavType.IntType },
                 navArgument("mediaType") { type = NavType.StringType },
                 navArgument("title") { type = NavType.StringType },
                 navArgument("season") { type = NavType.IntType; defaultValue = 1 },
                 navArgument("episode") { type = NavType.IntType; defaultValue = 1 },
-                navArgument("autoPlay") { type = NavType.BoolType; defaultValue = false }
+                navArgument("autoPlay") { type = NavType.BoolType; defaultValue = false },
+                navArgument("poster") { type = NavType.StringType; defaultValue = NULL_SENTINEL },
+                navArgument("backdrop") { type = NavType.StringType; defaultValue = NULL_SENTINEL },
+                navArgument("vote") { type = NavType.StringType; defaultValue = "0.0" }
             )
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
@@ -223,10 +282,17 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
+            val posterRaw = Uri.decode(backStackEntry.arguments?.getString("poster") ?: NULL_SENTINEL)
+            val backdropRaw = Uri.decode(backStackEntry.arguments?.getString("backdrop") ?: NULL_SENTINEL)
+            val voteRaw = backStackEntry.arguments?.getString("vote")?.toDoubleOrNull() ?: 0.0
 
             DetailsScreen(
                 movieId = movieId,
                 mediaType = mediaType,
+                initialTitle = title,
+                initialPoster = posterRaw.takeIf { it != NULL_SENTINEL },
+                initialBackdrop = backdropRaw.takeIf { it != NULL_SENTINEL },
+                initialVoteAverage = voteRaw.takeIf { it > 0.0 },
                 initialSeason = season,
                 initialEpisode = episode,
                 autoShowServers = autoPlay,

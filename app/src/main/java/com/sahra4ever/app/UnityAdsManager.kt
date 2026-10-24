@@ -18,33 +18,25 @@ object UnityAdsManager {
 
     private const val GAME_ID = "800408926"
     private const val INTERSTITIAL_PLACEMENT_ID = "BP_Interstitial_Android"
-    // ✅ (جديد) Placement مخصص لإعلانات المكافأة (Rewarded) — يُستخدم حصرياً لفتح السيرفر الأول VIP
     private const val REWARDED_PLACEMENT_ID = "Rewarded_Android"
 
-    // اجعلها true فقط أثناء الاختبار
-    private const val TEST_MODE = false
+    // ✅ تم التعديل هنا: تفعيل وضع الاختبار لتظهر الإعلانات التجريبية فوراً
+    private const val TEST_MODE = true 
 
-    // ✅ مهلة أمان: إذا لم يستجب Unity SDK خلال هذه المدة (مشكلة معروفة أحياناً)
-    // نُجبر إنهاء العملية بدل ترك المستخدم أو النافذة عالقَين للأبد.
     private const val SHOW_TIMEOUT_MS = 8_000L
 
     private val mainHandler = Handler(Looper.getMainLooper())
-
     private var isInitializing = false
 
-    // --- حالة الإعلان البيني (Interstitial) ---
     private var isLoading = false
     private var isLoaded = false
 
-    // --- حالة إعلان المكافأة (Rewarded) ---
     private var isRewardedLoading = false
     private var isRewardedLoaded = false
 
-    // ✅ حالة عرض مشتركة بين النوعين لمنع تداخل الإعلانات (لا يمكن عرض إعلانين في آن واحد مهما كان نوعهما)
     @Volatile
     private var isShowing = false
 
-    /** تهيئة الـ SDK (آمنة للاستدعاء أكثر من مرة). */
     fun initialize(context: Context) {
         if (UnityAds.isInitialized) {
             loadAd()
@@ -77,7 +69,6 @@ object UnityAdsManager {
         )
     }
 
-    /** تحميل إعلان بيني مسبقاً ليكون جاهزاً للعرض. */
     fun loadAd() {
         if (!UnityAds.isInitialized || isLoading || isLoaded) return
         isLoading = true
@@ -104,7 +95,6 @@ object UnityAdsManager {
         )
     }
 
-    /** ✅ (جديد) تحميل إعلان المكافأة مسبقاً ليكون جاهزاً للعرض. */
     fun loadRewardedAd() {
         if (!UnityAds.isInitialized || isRewardedLoading || isRewardedLoaded) return
         isRewardedLoading = true
@@ -131,12 +121,6 @@ object UnityAdsManager {
         )
     }
 
-    /**
-     * عرض الإعلان البيني.
-     * onFinished(true)  => الإعلان عُرض وتم إغلاقه.
-     * onFinished(false) => لا يوجد إعلان / فشل العرض / الـ Activity غير صالحة (افتح السيرفر مباشرة).
-     * يُستدعى onFinished مرة واحدة فقط دائماً مهما حصل (بما في ذلك حالات الفشل الصامت).
-     */
     fun showInterstitial(activity: Activity?, onFinished: (shown: Boolean) -> Unit) {
         val finishedGuard = AtomicBoolean(false)
         val timeoutToken = Any()
@@ -147,14 +131,12 @@ object UnityAdsManager {
             }
         }
 
-        // ✅ تحقق أن الـ Activity ما زالت حيّة قبل محاولة فتح نافذة الإعلان.
         if (activity == null || activity.isFinishing || activity.isDestroyed) {
             if (activity != null) initialize(activity)
             finishOnce(false)
             return
         }
 
-        // ✅ منع تداخل الإعلانات: لا نعرض إعلاناً بينياً إذا كان أي إعلان آخر (بيني أو مكافأة) معروضاً حالياً
         if (!UnityAds.isInitialized || !isLoaded || isShowing) {
             initialize(activity)
             loadAd()
@@ -192,7 +174,6 @@ object UnityAdsManager {
                     }
 
                     override fun onUnityAdsShowStart(placementId: String?) {}
-
                     override fun onUnityAdsShowClick(placementId: String?) {}
 
                     override fun onUnityAdsShowComplete(
@@ -213,15 +194,6 @@ object UnityAdsManager {
         }
     }
 
-    /**
-     * ✅ (جديد) عرض إعلان المكافأة (Rewarded) — مخصص لفتح السيرفر الأول VIP.
-     * onFinished(success, failedToLoad):
-     *   - success = true   => المستخدم شاهد الإعلان بالكامل (استحق المكافأة).
-     *   - success = false, failedToLoad = false => المستخدم أغلق الإعلان مبكراً (لم يستحق المكافأة).
-     *   - failedToLoad = true => لا يوجد إعلان جاهز / فشل التحميل أو العرض / Activity غير صالحة
-     *                             (في هذه الحالة success تكون دائماً false، والمستدعي يقرر فتح السيرفر مجاناً).
-     * يُستدعى onFinished مرة واحدة فقط دائماً مهما حصل.
-     */
     fun showRewardedAd(activity: Activity?, onFinished: (success: Boolean, failedToLoad: Boolean) -> Unit) {
         val finishedGuard = AtomicBoolean(false)
         val timeoutToken = Any()
@@ -232,16 +204,12 @@ object UnityAdsManager {
             }
         }
 
-        // ✅ تحقق أن الـ Activity ما زالت حيّة قبل محاولة فتح نافذة الإعلان
         if (activity == null || activity.isFinishing || activity.isDestroyed) {
             if (activity != null) initialize(activity)
             finishOnce(false, true)
             return
         }
 
-        // ✅ منع تداخل الإعلانات: لا نعرض إعلان مكافأة إذا كان أي إعلان آخر معروضاً حالياً،
-        // وإن لم يكن الإعلان جاهزاً (لم يُحمَّل بعد / فشل التحميل) نعتبرها "فشل تحميل" فوراً
-        // كي تفتح الشاشة المستدعية السيرفر VIP مجاناً دون تعليق المستخدم.
         if (!UnityAds.isInitialized || !isRewardedLoaded || isShowing) {
             initialize(activity)
             loadRewardedAd()
@@ -279,7 +247,6 @@ object UnityAdsManager {
                     }
 
                     override fun onUnityAdsShowStart(placementId: String?) {}
-
                     override fun onUnityAdsShowClick(placementId: String?) {}
 
                     override fun onUnityAdsShowComplete(
@@ -288,8 +255,6 @@ object UnityAdsManager {
                     ) {
                         isShowing = false
                         loadRewardedAd()
-                        // ✅ الإعلان يُعتبر "مُكافأً" فقط إذا اكتمل بالكامل (COMPLETED)؛
-                        // إذا أغلقه المستخدم مبكراً تكون الحالة SKIPPED => لا مكافأة.
                         val earned = state == UnityAds.UnityAdsShowCompletionState.COMPLETED
                         finishOnce(earned, false)
                     }
@@ -303,7 +268,6 @@ object UnityAdsManager {
         }
     }
 
-    /** يُستدعى عند تدمير النشاط الرئيسي (مثلاً من onDestroy في MainActivity) لتفادي أي تسريب حالة. */
     fun reset() {
         mainHandler.removeCallbacksAndMessages(null)
         isShowing = false

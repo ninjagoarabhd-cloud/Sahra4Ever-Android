@@ -3,6 +3,7 @@ package com.sahra4ever.app
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.util.LruCache
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -57,8 +58,11 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.util.Locale
 
 private const val API_KEY = "26097366152d7131fde0f53b80ee37de"
@@ -98,53 +102,63 @@ private data class DetailsUi(
     val posterPath: String?,
     val rating: Double?,
     val date: String?,
-    val seasons: List<Season>? = null
+    val seasons: List<Season>? = null,
+    // ✅ (Optimistic UI) true فقط عندما تكون هذه بيانات أولية جزئية جاءت من الشاشة السابقة
+    // عبر Navigation، قبل اكتمال طلب الشبكة الحقيقي. لا تُستخدم أبداً للبيانات القادمة من fetchDetails.
+    val isPlaceholder: Boolean = false
 )
 
-private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi = withContext(Dispatchers.IO) {
-    val api = TMDBApi.create()
-    var title = ""
-    var overview = ""
-    var backdrop: String? = null
-    var poster: String? = null
-    var rating: Double? = null
-    var date: String? = null
-    var seasons: List<Season>? = null
+// ✅ (منع إعادة الجلب) ذاكرة تخزين مؤقت بسيطة بمفتاح "mediaType-id" لتفادي إعادة طلب
+// نفس الفيلم/المسلسل من الشبكة في كل مرة يُفتح فيها خلال نفس جلسة التطبيق.
+private val detailsCache = LruCache<String, DetailsUi>(20)
 
-    try {
-        if (mediaType == "tv") {
-            val arD = api.getTvDetails(id, API_KEY, "ar-SA")
-            title = arD.name ?: ""
-            overview = arD.overview ?: ""
-            backdrop = arD.backdropPath
-            poster = arD.posterPath
-            rating = arD.voteAverage
-            date = arD.firstAirDate
-            seasons = arD.seasons
+/**
+ * ✅ (الجلب المتوازي) الآن تُنفَّذ طلبات ar-SA و en-US معاً عبر async/await بدل التسلسل،
+ * مع السماح بنجاح أحدهما حتى لو فشل الآخر (tryOrNull) بدل فشل العملية بالكامل.
+ * الصور تُفضَّل من en-US (نفس منطق الصفحة الرئيسية)، والنصوص تُفضَّل من ar-SA.
+ */
+private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi = coroutineScope {
+    val api = TmdbClient.api
 
-            if (overview.isBlank()) {
-                val enD = api.getTvDetails(id, API_KEY, "en-US")
-                overview = enD.overview ?: ""
-            }
-        } else {
-            val arD = api.getMovieDetails(id, API_KEY, "ar-SA")
-            title = arD.title ?: ""
-            overview = arD.overview ?: ""
-            backdrop = arD.backdropPath
-            poster = arD.posterPath
-            rating = arD.voteAverage
-            date = arD.releaseDate
+    if (mediaType == "tv") {
+        val arDeferred = async { tryOrNull { api.getTvDetails(id, API_KEY, "ar-SA") } }
+        val enDeferred = async { tryOrNull { api.getTvDetails(id, API_KEY, "en-US") } }
+        val arD = arDeferred.await()
+        val enD = enDeferred.await()
+        if (arD == null && enD == null) throw IOException("fetch failed for tv/$id")
 
-            if (overview.isBlank()) {
-                val enD = api.getMovieDetails(id, API_KEY, "en-US")
-                overview = enD.overview ?: ""
-            }
-        }
-    } catch (e: Exception) { }
+        val overviewText = (arD?.overview?.takeIf { it.isNotBlank() } ?: enD?.overview ?: "")
+            .ifBlank { "لا توجد قصة متاحة حالياً." }
 
-    if (overview.isBlank()) overview = "لا توجد قصة متاحة حالياً."
+        DetailsUi(
+            title = arD?.name ?: enD?.name ?: "",
+            overview = overviewText,
+            backdropPath = enD?.backdropPath ?: arD?.backdropPath,
+            posterPath = enD?.posterPath ?: arD?.posterPath,
+            rating = arD?.voteAverage ?: enD?.voteAverage,
+            date = arD?.firstAirDate ?: enD?.firstAirDate,
+            seasons = arD?.seasons ?: enD?.seasons
+        )
+    } else {
+        val arDeferred = async { tryOrNull { api.getMovieDetails(id, API_KEY, "ar-SA") } }
+        val enDeferred = async { tryOrNull { api.getMovieDetails(id, API_KEY, "en-US") } }
+        val arD = arDeferred.await()
+        val enD = enDeferred.await()
+        if (arD == null && enD == null) throw IOException("fetch failed for movie/$id")
 
-    DetailsUi(title, overview, backdrop, poster, rating, date, seasons)
+        val overviewText = (arD?.overview?.takeIf { it.isNotBlank() } ?: enD?.overview ?: "")
+            .ifBlank { "لا توجد قصة متاحة حالياً." }
+
+        DetailsUi(
+            title = arD?.title ?: enD?.title ?: "",
+            overview = overviewText,
+            backdropPath = enD?.backdropPath ?: arD?.backdropPath,
+            posterPath = enD?.posterPath ?: arD?.posterPath,
+            rating = arD?.voteAverage ?: enD?.voteAverage,
+            date = arD?.releaseDate ?: enD?.releaseDate,
+            seasons = null
+        )
+    }
 }
 
 private suspend fun extractColor(context: Context, url: String?): Color? {
@@ -170,6 +184,12 @@ private suspend fun extractColor(context: Context, url: String?): Color? {
 fun DetailsScreen(
     movieId: Int,
     mediaType: String,
+    // ✅ (Optimistic UI) بيانات أولية قادمة من الشاشة السابقة (الرئيسية/متابعة المشاهدة) عبر Navigation.
+    // تُستخدم لعرض فوري (عنوان + صورة + تقييم) في أول فريم، قبل اكتمال طلب الشبكة الحقيقي.
+    initialTitle: String? = null,
+    initialPoster: String? = null,
+    initialBackdrop: String? = null,
+    initialVoteAverage: Double? = null,
     initialSeason: Int = 1,
     initialEpisode: Int = 1,
     autoShowServers: Boolean = false,
@@ -178,7 +198,30 @@ fun DetailsScreen(
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         val context = LocalContext.current
-        var ui by remember(movieId, mediaType) { mutableStateOf<DetailsUi?>(null) }
+
+        // ✅ (Optimistic UI + Cache) فحص متزامن للكاش عند التهيئة، وإلا بناء بيانات مؤقتة
+        // من initialTitle/initialPoster/initialBackdrop/initialVoteAverage إن توفرت.
+        // هذا يضمن عدم وجود أي وميض فارغ (شاشة سوداء) عند أول دخول أو عند العودة لنفس الفيلم لاحقاً.
+        var ui by remember(movieId, mediaType) {
+            val cached = detailsCache.get("$mediaType-$movieId")
+            mutableStateOf(
+                cached ?: if (initialTitle != null || initialPoster != null || initialBackdrop != null) {
+                    DetailsUi(
+                        title = initialTitle ?: "",
+                        overview = "",
+                        backdropPath = initialBackdrop,
+                        posterPath = initialPoster,
+                        rating = initialVoteAverage,
+                        date = null,
+                        seasons = null,
+                        isPlaceholder = true
+                    )
+                } else null
+            )
+        }
+        var isFullyLoaded by remember(movieId, mediaType) {
+            mutableStateOf(detailsCache.get("$mediaType-$movieId") != null)
+        }
         var accent by remember(movieId, mediaType) { mutableStateOf<Color?>(null) }
         var error by remember { mutableStateOf(false) }
         var reloadKey by remember { mutableIntStateOf(0) }
@@ -212,10 +255,35 @@ fun DetailsScreen(
         }
 
         LaunchedEffect(movieId, mediaType, reloadKey) {
+            val cacheKey = "$mediaType-$movieId"
+            val cachedUi = if (reloadKey == 0) detailsCache.get(cacheKey) else null
+            if (cachedUi != null) {
+                // ✅ عودة لنفس الفيلم خلال نفس الجلسة: بيانات كاملة فوراً بدون أي طلب شبكة
+                ui = cachedUi
+                isFullyLoaded = true
+                if (accent == null) {
+                    launch(Dispatchers.IO) {
+                        accent = extractColor(context, img(cachedUi.backdropPath ?: cachedUi.posterPath, "w300"))
+                    }
+                }
+                return@LaunchedEffect
+            }
+
+            // ✅ لا يوجد كاش: استخرج لون الخلفية فوراً من بيانات العرض الأولي (إن وُجدت)
+            // كي لا تنتظر الخلفية طلب الشبكة الكامل لتظهر بلون مناسب للفيلم.
+            val seedImg = initialBackdrop ?: initialPoster
+            if (seedImg != null) {
+                launch(Dispatchers.IO) {
+                    accent = extractColor(context, img(seedImg, "w300"))
+                }
+            }
+
             error = false
             try {
                 val d = fetchDetails(movieId, mediaType)
                 ui = d
+                isFullyLoaded = true
+                detailsCache.put(cacheKey, d)
                 launch(Dispatchers.IO) {
                     accent = extractColor(context, img(d.backdropPath ?: d.posterPath, "w300"))
                 }
@@ -226,11 +294,12 @@ fun DetailsScreen(
             }
         }
 
-        LaunchedEffect(autoShowServers, ui) {
-            if (autoShowServers && ui != null) {
+        LaunchedEffect(autoShowServers, isFullyLoaded) {
+            if (autoShowServers && isFullyLoaded) {
+                val d = ui
                 if (mediaType == "tv") {
-                    val targetSeason = ui?.seasons?.find { it.seasonNumber == initialSeason }
-                        ?: ui?.seasons?.firstOrNull { it.seasonNumber > 0 }
+                    val targetSeason = d?.seasons?.find { it.seasonNumber == initialSeason }
+                        ?: d?.seasons?.firstOrNull { it.seasonNumber > 0 }
                     if (targetSeason != null) {
                         selectedSeason = targetSeason
                         episodes = List(targetSeason.episodeCount ?: 1) { Episode(it + 1, "الحلقة ${it + 1}", "") }
@@ -324,6 +393,9 @@ fun DetailsScreen(
         ) {
             val isTablet = maxWidth >= TABLET_BREAKPOINT
             val d = ui
+            // ✅ لا يُسمح بفتح شيت المواسم/السيرفرات عبر زر "شاهد الآن" للمسلسلات قبل اكتمال
+            // تحميل بيانات المواسم الحقيقية (تفادي شيت فارغ)؛ الأفلام تعمل فوراً بلا قيد.
+            val canPlay = !(mediaType == "tv" && !isFullyLoaded)
             when {
                 d != null -> {
                     Box(Modifier.fillMaxSize()) {
@@ -339,8 +411,12 @@ fun DetailsScreen(
                         ) {
                             DetailsBody(
                                 d = d,
+                                isFullyLoaded = isFullyLoaded,
+                                canPlay = canPlay,
                                 isFavorite = isFavorite,
                                 onToggleFavorite = { toggleFavorite() },
+                                showInlineError = error,
+                                onRetryInline = { reloadKey++ },
                                 commentsContent = { CommentSection(movieId, mediaType) }
                             ) {
                                 if (mediaType == "tv") {
@@ -501,16 +577,23 @@ private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 private fun DetailsBody(
     d: DetailsUi,
+    isFullyLoaded: Boolean,
+    canPlay: Boolean,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
+    showInlineError: Boolean,
+    onRetryInline: () -> Unit,
     commentsContent: @Composable () -> Unit,
     onPlay: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val year = d.date?.take(4)?.takeIf { it.length == 4 }
     val rating = d.rating?.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }
-    val overview = d.overview.ifBlank { "لا توجد قصة متاحة حالياً." }
-    val badge = remember(d) { computeBadge(d.date, d.overview) }
+    // ✅ أثناء العرض الأولي (قبل اكتمال التحميل الحقيقي) نعرض نص "جاري التحميل" بدل
+    // الإيحاء الخاطئ بعدم وجود قصة متاحة إطلاقاً.
+    val overview = if (!isFullyLoaded) "جاري تحميل القصة..." else d.overview.ifBlank { "لا توجد قصة متاحة حالياً." }
+    // ✅ تُحجب الشارة أثناء العرض الأولي لتفادي ومضة شارة خاطئة قبل معرفة تاريخ الإصدار الحقيقي
+    val badge = remember(d, isFullyLoaded) { if (isFullyLoaded) computeBadge(d.date, d.overview) else null }
 
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
         Box(Modifier.fillMaxWidth()) {
@@ -536,9 +619,8 @@ private fun DetailsBody(
                 )
             )
 
-            badge?.let {
-                BadgeLabel(it, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp))
-            }
+            // ✅ (تمت إزالة BadgeLabel من فوق صورة الغلاف نهائياً - تم نقلها بجانب زر "شاهد الآن" أدناه
+            // لتقليل الزحام البصري في منطقة الـ Backdrop)
 
             Column(
                 Modifier
@@ -578,19 +660,68 @@ private fun DetailsBody(
                     year?.let { MetaChip(it, Color.White) }
                 }
 
+                // ✅ (بانر إعادة محاولة مصغّر) يظهر فقط إذا فشل التحديث الكامل بينما البيانات
+                // الأولية (من الشاشة السابقة أو الكاش) ما زالت معروضة، بدل حرمان المستخدم من أي تحكم.
+                if (showInlineError) {
+                    Row(
+                        Modifier
+                            .padding(top = 14.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFE53935).copy(alpha = 0.18f))
+                            .border(1.dp, Color(0xFFE53935).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("تعذّر تحديث كامل التفاصيل", color = Color.White, fontSize = 13.sp)
+                        TextButton(onClick = onRetryInline) {
+                            Text("إعادة المحاولة", color = Color(0xFFFF6659), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                // ✅ (الشارة الجديدة) تظهر الآن فوق صف "شاهد الآن" مباشرة بدل أعلى صورة الغلاف،
+                // محاذاة لبداية الصف (يمين الشاشة في RTL) كي تبدو مرتبطة بزر التشغيل تحديداً،
+                // وبحجم صغير وأنيق دون أي زحام بصري إضافي.
+                badge?.let {
+                    Row(
+                        Modifier
+                            .padding(top = 20.dp)
+                            .align(Alignment.Start)
+                    ) {
+                        BadgeLabel(it)
+                    }
+                }
+
                 // ✅ زر "شاهد الآن" + زر المفضلة بجانبه (صح عند الإضافة / + عند عدم الإضافة)
                 Row(
-                    Modifier.padding(top = 20.dp).fillMaxWidth(),
+                    Modifier.padding(top = if (badge != null) 10.dp else 20.dp).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Button(
                         onClick = onPlay,
+                        enabled = canPlay,
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black,
+                            disabledContainerColor = Color.White.copy(alpha = 0.6f),
+                            disabledContentColor = Color.Black.copy(alpha = 0.5f)
+                        ),
                         modifier = Modifier.weight(1f).height(52.dp)
                     ) {
-                        Icon(Icons.Outlined.PlayArrow, null)
-                        Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        if (canPlay) {
+                            Icon(Icons.Outlined.PlayArrow, null)
+                            Text(" شاهد الآن", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.Black.copy(alpha = 0.6f)
+                            )
+                            Text(" جاري التحميل...", fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(start = 8.dp))
+                        }
                     }
 
                     val favShape = RoundedCornerShape(8.dp)
@@ -622,7 +753,13 @@ private fun DetailsBody(
                         .clickable { expanded = !expanded }
                         .padding(16.dp)
                 ) {
-                    Text("القصة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("القصة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                        if (!isFullyLoaded) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Pink)
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         overview,

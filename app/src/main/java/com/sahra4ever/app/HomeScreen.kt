@@ -105,7 +105,9 @@ private val CardScrim = Brush.verticalGradient(0.3f to Color.Transparent, 1f to 
 
 @Immutable
 private data class HomeData(
+    val heroes: List<Movie> = emptyList(),
     val trending: List<Movie> = emptyList(),
+    val topRated: List<Movie> = emptyList(),
     val nowPlaying: List<Movie> = emptyList(),
     val airing: List<Movie> = emptyList(),
     val anime: List<Movie> = emptyList()
@@ -129,18 +131,120 @@ private fun List<Movie>.clean(type: String?): List<Movie> =
         .distinctBy { "${it.mediaType}-${it.id}" }
         .toList()
 
+/**
+ * ✅ (الجلب المزدوج / Bilingual Fetch)
+ * ينفذ طلبين متوازيين (ar-SA لجلب النصوص، en-US لجلب الصور) ثم يدمجهما:
+ * يحتفظ بكل حقول النسخة العربية (العنوان، القصة...)، ويستبدل فقط posterPath/backdropPath
+ * بما يقابلها من النسخة الإنجليزية إن وُجدت (لأن TMDB أحياناً لا يرجع صوراً مع اللغة العربية).
+ * المطابقة تتم عبر مفتاح "mediaType-id" لضمان ربط كل عنصر بنظيره الصحيح.
+ */
+private suspend fun fetchBilingual(
+    arCall: suspend () -> MovieResponse,
+    enCall: suspend () -> MovieResponse
+): List<Movie> = coroutineScope {
+    val arDeferred = async { tryOrNull { arCall() }?.results ?: emptyList() }
+    val enDeferred = async { tryOrNull { enCall() }?.results ?: emptyList() }
+    val arList = arDeferred.await()
+    val enList = enDeferred.await()
+    if (arList.isEmpty()) return@coroutineScope enList
+    val enMap = enList.associateBy { "${it.mediaType}-${it.id}" }
+    arList.map { arItem ->
+        val enItem = enMap["${arItem.mediaType}-${arItem.id}"]
+        if (enItem != null) {
+            arItem.copy(
+                posterPath = enItem.posterPath ?: arItem.posterPath,
+                backdropPath = enItem.backdropPath ?: arItem.backdropPath
+            )
+        } else arItem
+    }
+}
+
 private suspend fun fetchHome(): HomeData = coroutineScope {
     val api = TmdbClient.api
-    suspend fun safe(type: String?, block: suspend () -> List<Movie>): List<Movie> =
-        tryOrNull { block() }?.clean(type) ?: emptyList()
 
-    val trending = async { safe(null) { api.getTrendingToday(TMDB_API_KEY, "en-US").results } }
-    val nowPlaying = async { safe("movie") { api.getNowPlayingMovies(TMDB_API_KEY, "en-US").results } }
-    val airing = async { safe("tv") { api.getAiringTodayTVShows(TMDB_API_KEY, "en-US").results } }
-    val anime = async { safe("tv") { api.getAnimeShows(TMDB_API_KEY, "en-US").results } }
+    // ✅ heroes: trending/all/week ثنائي اللغة — movie/tv فقط + backdrop_path إلزامي + أول 5
+    val heroesDeferred = async {
+        tryOrNull {
+            fetchBilingual(
+                { api.getTrendingWeek(TMDB_API_KEY, "ar-SA") },
+                { api.getTrendingWeek(TMDB_API_KEY, "en-US") }
+            )
+        }
+            ?.filter { (it.mediaType == "movie" || it.mediaType == "tv") && it.backdropPath != null }
+            ?.distinctBy { "${it.mediaType}-${it.id}" }
+            ?.take(5)
+            ?: emptyList()
+    }
 
-    val data = HomeData(trending.await(), nowPlaying.await(), airing.await(), anime.await())
-    if (data.trending.isEmpty() && data.nowPlaying.isEmpty() && data.airing.isEmpty() && data.anime.isEmpty()) {
+    // ✅ trending: trending/all/day ثنائي اللغة — استبعاد person
+    val trendingDeferred = async {
+        tryOrNull {
+            fetchBilingual(
+                { api.getTrendingToday(TMDB_API_KEY, "ar-SA") },
+                { api.getTrendingToday(TMDB_API_KEY, "en-US") }
+            )
+        }?.clean(null)?.filter { it.mediaType != "person" } ?: emptyList()
+    }
+
+    val nowPlayingDeferred = async {
+        tryOrNull {
+            fetchBilingual(
+                { api.getNowPlayingMovies(TMDB_API_KEY, "ar-SA") },
+                { api.getNowPlayingMovies(TMDB_API_KEY, "en-US") }
+            )
+        }?.clean("movie") ?: emptyList()
+    }
+
+    val airingDeferred = async {
+        tryOrNull {
+            fetchBilingual(
+                { api.getAiringTodayTVShows(TMDB_API_KEY, "ar-SA") },
+                { api.getAiringTodayTVShows(TMDB_API_KEY, "en-US") }
+            )
+        }?.clean("tv") ?: emptyList()
+    }
+
+    val animeDeferred = async {
+        tryOrNull {
+            fetchBilingual(
+                { api.getAnimeShows(TMDB_API_KEY, "ar-SA") },
+                { api.getAnimeShows(TMDB_API_KEY, "en-US") }
+            )
+        }?.clean("tv") ?: emptyList()
+    }
+
+    // ✅ topRated: discover/movie + discover/tv (ثنائي اللغة لكل منهما)، دمج وترتيب تنازلي، أفضل 20
+    val topRatedDeferred = async {
+        val moviesDeferred = async {
+            tryOrNull {
+                fetchBilingual(
+                    { api.getTopRatedMoviesDiscover(TMDB_API_KEY, language = "ar-SA") },
+                    { api.getTopRatedMoviesDiscover(TMDB_API_KEY, language = "en-US") }
+                )
+            }?.clean("movie") ?: emptyList()
+        }
+        val tvDeferred = async {
+            tryOrNull {
+                fetchBilingual(
+                    { api.getTopRatedTvDiscover(TMDB_API_KEY, language = "ar-SA") },
+                    { api.getTopRatedTvDiscover(TMDB_API_KEY, language = "en-US") }
+                )
+            }?.clean("tv") ?: emptyList()
+        }
+        (moviesDeferred.await() + tvDeferred.await())
+            .sortedByDescending { it.voteAverage?.toDouble() ?: 0.0 }
+            .take(20)
+    }
+
+    val data = HomeData(
+        heroes = heroesDeferred.await(),
+        trending = trendingDeferred.await(),
+        topRated = topRatedDeferred.await(),
+        nowPlaying = nowPlayingDeferred.await(),
+        airing = airingDeferred.await(),
+        anime = animeDeferred.await()
+    )
+    if (data.heroes.isEmpty() && data.trending.isEmpty() && data.nowPlaying.isEmpty() && data.airing.isEmpty() && data.anime.isEmpty()) {
         throw IOException("no data")
     }
     data
@@ -153,7 +257,7 @@ private fun Movie.contentBadge(): ContentBadge? = computeBadge(releaseDate ?: fi
 
 @Composable
 fun HomeScreen(
-    onMovieClick: (Int, String, String) -> Unit,
+    onMovieClick: (Int, String, String, String?, String?, Double?) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
     onCategoryClick: (String) -> Unit,
     onMyListClick: () -> Unit = {}
@@ -165,7 +269,7 @@ fun HomeScreen(
 
 @Composable
 private fun HomeContent(
-    onMovieClick: (Int, String, String) -> Unit,
+    onMovieClick: (Int, String, String, String?, String?, Double?) -> Unit,
     onContinueWatchingClick: (WatchHistory) -> Unit,
     onCategoryClick: (String) -> Unit,
     onMyListClick: () -> Unit
@@ -243,9 +347,8 @@ private fun HomeContent(
             }
     }
 
-    val filtered = remember(home) { home.trending.filter { it.posterPath != null } }
-    val heroes = remember(filtered) { filtered.take(5) }
-    val rest = remember(filtered) { filtered.drop(5) }
+    val heroes = remember(home) { home.heroes }
+    val rest = remember(home) { home.trending }
     val pagerState = rememberPagerState { heroes.size }
 
     LaunchedEffect(heroes) {
@@ -258,8 +361,10 @@ private fun HomeContent(
         }
     }
 
+    // ✅ (Optimistic UI) تمرير poster/backdrop/voteAverage الموجودة فعلاً في كائن Movie
+    // لتُستخدم كعرض أولي فوري في DetailsScreen دون أي طلب شبكة إضافي
     val movieClick = remember(onMovieClick) {
-        { m: Movie -> onMovieClick(m.id, m.mediaType ?: "movie", m.displayTitle()) }
+        { m: Movie -> onMovieClick(m.id, m.mediaType ?: "movie", m.displayTitle(), m.posterPath, m.backdropPath, m.voteAverage) }
     }
 
     // ✅ (دعم الأجهزة اللوحية) BoxWithConstraints يسمح بمعرفة عرض الشاشة الفعلي
@@ -283,7 +388,7 @@ private fun HomeContent(
                     Button(onClick = { reloadKey++ }, colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Color.White)) { Text("إعادة المحاولة") }
                 }
                 else -> HomeFeed(
-                    heroes = heroes, rest = rest, nowPlaying = home.nowPlaying, airing = home.airing, anime = home.anime,
+                    heroes = heroes, rest = rest, topRated = home.topRated, nowPlaying = home.nowPlaying, airing = home.airing, anime = home.anime,
                     history = history, pagerState = pagerState, listState = listState,
                     onChip = onCategoryClick, onMovieClick = movieClick, onContinue = onContinueWatchingClick,
                     isTablet = isTablet
@@ -368,7 +473,7 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
 
 @Composable
 private fun HomeFeed(
-    heroes: List<Movie>, rest: List<Movie>, nowPlaying: List<Movie>, airing: List<Movie>, anime: List<Movie>,
+    heroes: List<Movie>, rest: List<Movie>, topRated: List<Movie>, nowPlaying: List<Movie>, airing: List<Movie>, anime: List<Movie>,
     history: List<WatchHistory>, pagerState: PagerState, listState: LazyListState,
     onChip: (String) -> Unit, onMovieClick: (Movie) -> Unit, onContinue: (WatchHistory) -> Unit,
     isTablet: Boolean
@@ -407,6 +512,7 @@ private fun HomeFeed(
             }
         }
         movieRow("trending", "الترند الآن", rest, onMovieClick, isTablet)
+        movieRow("top_rated", "الأعمال الأعلى تقييماً", topRated, onMovieClick, isTablet)
         movieRow("now", "وصل حديثاً للسينما", nowPlaying, onMovieClick, isTablet)
         movieRow("airing", "جديد المسلسلات", airing, onMovieClick, isTablet)
         movieRow("anime", "عالم الأنمي", anime, onMovieClick, isTablet)
@@ -481,7 +587,7 @@ private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifi
         Box(Modifier.fillMaxSize().background(HeroScrim))
 
         badge?.let {
-            BadgeLabel(it, Modifier.align(Alignment.TopStart).padding(12.dp))
+            BadgeLabel(it, Modifier.align(Alignment.TopStart).padding(14.dp))
         }
 
         Column(Modifier.align(Alignment.BottomCenter).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
