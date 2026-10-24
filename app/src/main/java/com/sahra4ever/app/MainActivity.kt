@@ -4,8 +4,10 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -78,15 +80,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 var showSplash by rememberSaveable { mutableStateOf(true) }
-                Crossfade(
-                    targetState = showSplash,
-                    animationSpec = tween(500),
-                    label = "splash"
-                ) { splashVisible ->
-                    if (splashVisible) {
+
+                // ✅ التعديل الجديد: استخدام Box لتشغيل التطبيق واللوغو معاً
+                Box(modifier = Modifier.fillMaxSize()) {
+                    
+                    // 1. الواجهة الرئيسية تبدأ العمل فوراً وتجلب البيانات في الخلفية
+                    AppRoot()
+
+                    // 2. اللوغو يظهر فوق الواجهة ويختفي بتأثير تلاشي (Fade Out)
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        enter = fadeIn(animationSpec = tween(300)),
+                        exit = fadeOut(animationSpec = tween(500))
+                    ) {
                         SplashScreen(onFinished = { showSplash = false })
-                    } else {
-                        AppRoot()
                     }
                 }
             }
