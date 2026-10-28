@@ -30,24 +30,15 @@ object HistoryManager {
         prefs.edit().putString(KEY_HISTORY, Gson().toJson(finalList)).apply()
     }
 
-    /**
-     * ✅ (تحصين إضافي) محمية الآن ضد:
-     * 1. JSON معطوب الصياغة بالكامل (JsonSyntaxException) → تُرجع قائمة فارغة
-     *    بدل إسقاط التطبيق عند فتح الصفحة الرئيسية.
-     * 2. عناصر فردية تالفة داخل القائمة (title/type فعلياً null رغم تعريف
-     *    النوع في Kotlin، بسبب تجاوز Gson لنظام null-safety) → تُستبعد
-     *    تلقائياً بدل أن تصل لشاشة الـ Navigation وتسبب كراشاً لاحقاً.
-     */
     fun getHistory(context: Context): List<WatchHistory> {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val json = prefs.getString(KEY_HISTORY, null) ?: return emptyList()
 
-        val rawList: List<WatchHistory> = try {
-            val type = object : TypeToken<List<WatchHistory>>() {}.type
+        val rawList: List<WatchHistory?> = try {
+            val type = object : TypeToken<List<WatchHistory?>>() {}.type
             Gson().fromJson(json, type) ?: emptyList()
         } catch (e: JsonSyntaxException) {
             Log.e(TAG, "Corrupted history JSON, clearing it", e)
-            // تنظيف البيانات التالفة حتى لا تتكرر المشكلة في كل فتح
             prefs.edit().remove(KEY_HISTORY).apply()
             emptyList()
         } catch (e: Exception) {
@@ -55,8 +46,8 @@ object HistoryManager {
             emptyList()
         }
 
-        // استبعاد أي عنصر وصلت فيه قيم غير صالحة فعلياً رغم تعريف النوع
-        return rawList.filter { item ->
+        // ✅ الإصلاح الجذري: filterNotNull() يمنع الانهيار إذا كان أحد العناصر فارغاً (null)
+        return rawList.filterNotNull().filter { item ->
             @Suppress("SENSELESS_COMPARISON")
             (item.title as String?) != null &&
                 (item.type as String?) != null &&
