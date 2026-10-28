@@ -13,23 +13,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,9 +57,6 @@ private const val NULL_SENTINEL = "null"
 private const val DEFAULT_TITLE = "بدون عنوان"
 private const val DEFAULT_MEDIA_TYPE = "movie"
 
-/**
- * فك تشفير آمن لمعاملات بسيطة (مثل category) لا تحتاج Base64.
- */
 private fun safeDecode(value: String?, fallback: String = ""): String {
     if (value == null) return fallback
     return try {
@@ -74,11 +66,6 @@ private fun safeDecode(value: String?, fallback: String = ""): String {
     }
 }
 
-/**
- * ترميز آمن تماماً بـ Base64 (URL-safe, بدون padding) — يُنتج فقط
- * [A-Za-z0-9_-]، أي لا يحتوي أبداً على "/" أو "%" التي كانت تسبب
- * تعارضاً في مطابقة أنماط Navigation Compose.
- */
 private fun encodeSegment(value: String?): String {
     if (value.isNullOrBlank()) return NULL_SENTINEL
     return Base64.encodeToString(
@@ -99,10 +86,6 @@ private fun decodeSegment(value: String?): String? {
     }
 }
 
-/**
- * يمتص كل أحداث اللمس ولا تسمح لها بالمرور لأي عنصر أسفلها.
- * تُستخدم فوق AppRoot أثناء ظهور السبلاش.
- */
 private fun Modifier.blockAllTouches(): Modifier = this.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
@@ -112,22 +95,6 @@ private fun Modifier.blockAllTouches(): Modifier = this.pointerInput(Unit) {
     }
 }
 
-/**
- * ✅ (إصلاح كراش "متابعة المشاهدة") هذه الدالة تقبل الآن title وmediaType
- * كـ Nullable (String?) بدلاً من افتراض أنهما دائماً غير فارغين.
- *
- * السبب: Gson يتجاوز نظام null-safety الخاص بـ Kotlin عند التحويل من JSON.
- * فحتى لو كان WatchHistory.title مُعرَّفاً كـ String (غير قابل للـ null)
- * في الكود، فإن سجلات قديمة/تالفة في SharedPreferences (محفوظة بإصدار
- * سابق لا يحتوي هذا الحقل، أو JSON معطوب) تجعل Gson يضع null فعلياً في
- * وقت التشغيل رغم تعريف النوع. أي استخدام مباشر مثل title.ifBlank{...}
- * كان يرمي NullPointerException فوراً ويُسقط التطبيق.
- *
- * الحل: معاملة title وmediaType كـ Nullable دائماً هنا (بغض النظر عمّا
- * يقوله الـ compiler عن النوع المصدر)، مع قيمة افتراضية آمنة لكل منهما.
- * هذا يحمي جميع نقاط الاستدعاء (home, mylist, search, continue watching)
- * من نقطة واحدة مركزية.
- */
 private fun buildDetailsRoute(
     movieId: Int,
     mediaType: String?,
@@ -155,14 +122,47 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // ✅ صائد الأخطاء: حفظ سجل الانهيار في ملف
+        val crashFile = java.io.File(filesDir, "last_crash.txt")
+        Thread.setDefaultUncaughtExceptionHandler { _, e ->
+            crashFile.writeText(android.util.Log.getStackTraceString(e))
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+        val lastCrash = if (crashFile.exists()) crashFile.readText().also { crashFile.delete() } else null
+
         HomeDataInitializer.start(applicationContext)
 
         setContent {
             MaterialTheme {
                 var showSplash by rememberSaveable { mutableStateOf(true) }
+                
+                // ✅ عرض نافذة الخطأ إذا كان هناك انهيار سابق
+                var crashText by remember { mutableStateOf(lastCrash) }
+                if (crashText != null) {
+                    AlertDialog(
+                        onDismissRequest = { crashText = null },
+                        confirmButton = {
+                            TextButton(onClick = { crashText = null }) { Text("إغلاق", color = Color.Red) }
+                        },
+                        title = { Text("سجل الخطأ (Crash Log)", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Box(Modifier.heightIn(max = 400.dp)) {
+                                SelectionContainer {
+                                    Text(
+                                        crashText!!.take(5000), // أول 5000 حرف
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.verticalScroll(rememberScrollState())
+                                    )
+                                }
+                            }
+                        },
+                        containerColor = Color(0xFF1E1E2E),
+                        titleContentColor = Color.White,
+                        textContentColor = Color.LightGray
+                    )
+                }
 
                 Box(modifier = Modifier.fillMaxSize()) {
-
                     AppRoot()
 
                     AnimatedVisibility(
@@ -286,12 +286,6 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
                     )
                 },
                 onContinueWatchingClick = { historyItem ->
-                    // ✅ تحصين إضافي عند نقطة الاستدعاء (دفاع من طبقتين):
-                    // حتى لو كانت البيانات المخزَّنة قديمة/تالفة ويحمل
-                    // الكائن title أو type قيمة null فعلياً وقت التشغيل
-                    // (رغم أن Kotlin "يعتقد" أنها String غير قابلة للـ null)،
-                    // فإن buildDetailsRoute أصبحت الآن تتعامل معها كـ Nullable
-                    // داخلياً، وهنا نضيف طبقة حماية إضافية صريحة أيضاً.
                     navController.navigate(
                         buildDetailsRoute(
                             movieId = historyItem.id,
