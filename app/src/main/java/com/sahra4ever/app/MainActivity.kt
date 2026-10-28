@@ -2,6 +2,7 @@ package com.sahra4ever.app
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
@@ -59,10 +61,7 @@ private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
 private const val NULL_SENTINEL = "null"
 
 /**
- * ✅ (تحصين ضد الكراش) فك تشفير آمن لمعاملات الـ Navigation.
- * في حال وصل أي نص بتنسيق percent-encoding غير سليم (نادر لكن ممكن)،
- * Uri.decode يرمي IllegalArgumentException ويُسقط التطبيق فوراً.
- * هذه الدالة تمتص الخطأ وتُرجع قيمة افتراضية آمنة بدلاً من الكراش.
+ * فك تشفير آمن لمعاملات بسيطة (مثل category) لا تحتاج Base64.
  */
 private fun safeDecode(value: String?, fallback: String = ""): String {
     if (value == null) return fallback
@@ -70,6 +69,51 @@ private fun safeDecode(value: String?, fallback: String = ""): String {
         Uri.decode(value)
     } catch (e: Exception) {
         fallback
+    }
+}
+
+/**
+ * ✅ (إصلاح الكراش الجذري) ترميز آمن تماماً بـ Base64 (URL-safe, بدون padding).
+ *
+ * المشكلة الأصلية: posterPath/backdropPath القادمة من TMDB تبدأ دائماً بـ "/"
+ * (مثل "/abc.jpg")، وبعض العناوين قد تحتوي "/" أيضاً. حتى مع Uri.encode،
+ * آلية مطابقة الأنماط الداخلية في Navigation Compose (التي تتعامل مع الـ
+ * route كأنه Uri كامل) قد تتعثر وتُسقط التطبيق فوراً.
+ *
+ * Base64 (URL_SAFE) ينتج فقط [A-Za-z0-9_-]، أي لا يحتوي أبداً على "/" أو "%"
+ * أو أي رمز قد يُفسَّر كفاصل مسار، فيُزيل المشكلة من جذورها بشكل كامل.
+ */
+private fun encodeSegment(value: String?): String {
+    if (value.isNullOrBlank()) return NULL_SENTINEL
+    return Base64.encodeToString(
+        value.toByteArray(Charsets.UTF_8),
+        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+    )
+}
+
+private fun decodeSegment(value: String?): String? {
+    if (value.isNullOrBlank() || value == NULL_SENTINEL) return null
+    return try {
+        String(
+            Base64.decode(value, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING),
+            Charsets.UTF_8
+        )
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/**
+ * ✅ تمتص كل أحداث اللمس (نقر/سحب/تمرير) ولا تسمح لها بالمرور لأي عنصر
+ * أسفلها. تُستخدم فوق AppRoot أثناء ظهور السبلاش لمنع تسرّب اللمسات
+ * إلى الواجهة الحقيقية المُركَّبة أسفله.
+ */
+private fun Modifier.blockAllTouches(): Modifier = this.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            event.changes.forEach { it.consume() }
+        }
     }
 }
 
@@ -84,51 +128,55 @@ private fun buildDetailsRoute(
     backdropPath: String? = null,
     voteAverage: Double? = null
 ): String {
-    val posterSeg = Uri.encode(posterPath ?: NULL_SENTINEL)
-    val backdropSeg = Uri.encode(backdropPath ?: NULL_SENTINEL)
+    val titleSeg = encodeSegment(title.ifBlank { "بدون عنوان" })
+    val posterSeg = encodeSegment(posterPath)
+    val backdropSeg = encodeSegment(backdropPath)
     val voteSeg = (voteAverage ?: 0.0).toString()
-    return "details/$movieId/$mediaType/${Uri.encode(title)}/$season/$episode/$autoPlay/$posterSeg/$backdropSeg/$voteSeg"
+    return "details/$movieId/$mediaType/$titleSeg/$season/$episode/$autoPlay/$posterSeg/$backdropSeg/$voteSeg"
 }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ✅ (إصلاح تقطّع الأنيميشن) تبدأ تهيئة البيانات في الخلفية فوراً،
-        // قبل حتى استدعاء setContent، وبمعزل تام عن دورة حياة الـ Compose.
-        // هذا يضمن أن جلب الشبكة وقراءة الذاكرة يعملان على Dispatchers.IO
-        // بالتوازي مع أنيميشن اللوغو دون أي منافسة على الـ Main Thread.
+        // ✅ تهيئة البيانات تبدأ فوراً في الخلفية (Dispatchers.IO)، بمعزل
+        // تام عن دورة حياة الـ Compose، بالتوازي مع كل شيء آخر.
         HomeDataInitializer.start(applicationContext)
 
         setContent {
             MaterialTheme {
                 var showSplash by rememberSaveable { mutableStateOf(true) }
-                // ✅ لا يتم تركيب (compose) شجرة AppRoot الثقيلة إطلاقاً
-                // إلا بعد انتهاء أنيميشن اللوغو، فيحصل اللوغو على كامل
-                // موارد الـ Main Thread لنفسه ويعمل بسلاسة 60fps.
-                var mountApp by remember { mutableStateOf(false) }
 
                 Box(modifier = Modifier.fillMaxSize()) {
 
-                    if (mountApp) {
-                        AppRoot()
-                    }
+                    // ✅ (إصلاح التجمد) تُركَّب AppRoot فوراً منذ أول إطار،
+                    // لكنها تبقى مخفية بالكامل خلف السبلاش المعتم. هذا يمنح
+                    // Compose كامل مدة أنيميشن اللوغو (ثانية أو أكثر) لبناء
+                    // الشجرة الثقيلة (Pager/LazyColumn/صور Coil) تدريجياً عبر
+                    // عشرات الإطارات، بدلاً من تكديس كل التكلفة دفعة واحدة في
+                    // اللحظة التي يختفي فيها اللوغو (وهو ما كان يسبب التجمد).
+                    AppRoot()
 
                     AnimatedVisibility(
                         visible = showSplash,
                         enter = fadeIn(animationSpec = tween(300)),
                         exit = fadeOut(animationSpec = tween(500))
                     ) {
-                        SplashScreen(
-                            // ✅ ينتظر جاهزية البيانات (بدون حجب الـ Main Thread، مجرد suspend)
-                            // مع سقف زمني أقصى حتى لا يتجمد اللوغو في حال بطء الشبكة
-                            awaitReady = { HomeDataInitializer.awaitReady(timeoutMs = 4000L) },
-                            onFinished = {
-                                // تركيب الواجهة الحقيقية يبدأ بالتزامن مع بداية تلاشي اللوغو
-                                mountApp = true
-                                showSplash = false
-                            }
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                // ✅ يمنع أي تفاعل مع AppRoot المُركَّبة أسفلها
+                                // طالما السبلاش ظاهر على الشاشة.
+                                .blockAllTouches()
+                        ) {
+                            SplashScreen(
+                                // ينتظر جاهزية البيانات بدون حجب الـ Main Thread
+                                awaitReady = { HomeDataInitializer.awaitReady(timeoutMs = 4000L) },
+                                onFinished = {
+                                    showSplash = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -319,27 +367,29 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
             val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
-            val title = safeDecode(backStackEntry.arguments?.getString("title"), "بدون عنوان")
+            // ✅ فك تشفير Base64 بدلاً من Uri.decode لتفادي أي تعارض مع "/"
+            val title = decodeSegment(backStackEntry.arguments?.getString("title")) ?: "بدون عنوان"
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
-            val posterRaw = safeDecode(backStackEntry.arguments?.getString("poster"), NULL_SENTINEL)
-            val backdropRaw = safeDecode(backStackEntry.arguments?.getString("backdrop"), NULL_SENTINEL)
+            val posterRaw = decodeSegment(backStackEntry.arguments?.getString("poster"))
+            val backdropRaw = decodeSegment(backStackEntry.arguments?.getString("backdrop"))
             val voteRaw = backStackEntry.arguments?.getString("vote")?.toDoubleOrNull() ?: 0.0
 
             DetailsScreen(
                 movieId = movieId,
                 mediaType = mediaType,
                 initialTitle = title,
-                initialPoster = posterRaw.takeIf { it != NULL_SENTINEL },
-                initialBackdrop = backdropRaw.takeIf { it != NULL_SENTINEL },
+                initialPoster = posterRaw,
+                initialBackdrop = backdropRaw,
                 initialVoteAverage = voteRaw.takeIf { it > 0.0 },
                 initialSeason = season,
                 initialEpisode = episode,
                 autoShowServers = autoPlay,
                 onBack = { navController.popBackStack() },
                 onPlayClick = { id, type, t, s, e, serverIndex ->
-                    navController.navigate("player/$id/$type/${Uri.encode(t)}/$s/$e/$serverIndex")
+                    val titleSeg = encodeSegment(t.ifBlank { "بدون عنوان" })
+                    navController.navigate("player/$id/$type/$titleSeg/$s/$e/$serverIndex")
                 }
             )
         }
@@ -356,7 +406,7 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
             val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
-            val title = safeDecode(backStackEntry.arguments?.getString("title"), "بدون عنوان")
+            val title = decodeSegment(backStackEntry.arguments?.getString("title")) ?: "بدون عنوان"
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val serverIndex = backStackEntry.arguments?.getInt("serverIndex") ?: 0

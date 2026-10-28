@@ -3,7 +3,6 @@ package com.sahra4ever.app
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -18,48 +17,38 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
+// الخلفية الداكنة للشاشة
 private val SplashBackground = Color(0xFF0D0F14)
-private val DefaultGlowColor = Color(0xFFE5A93C)
 
 @Composable
 fun SplashScreen(
-    glowColor: Color = DefaultGlowColor,
-    // ✅ (إصلاح تأخر الواجهة) دالة suspend اختيارية تُستدعى بعد انتهاء الأنيميشن
-    // لانتظار جاهزية بيانات الواجهة الرئيسية. لأنها suspend فهي لا تحجب
-    // الـ Main Thread إطلاقاً (مجرد تعليق تعاوني للـ coroutine)، لذا لا تؤثر
-    // على سلاسة أي رسم، وتضمن أن الواجهة تكون جاهزة فوراً عند اختفاء اللوغو.
+    // تم حذف glowColor لأنه لم يعد هناك ضوء
     awaitReady: suspend () -> Unit = {},
     onFinished: () -> Unit
 ) {
     val logoAlpha = remember { Animatable(0f) }
     val logoScale = remember { Animatable(0.8f) }
-    val glow = remember { Animatable(0f) }
+    
     val currentOnFinished by rememberUpdatedState(onFinished)
     val currentAwaitReady by rememberUpdatedState(awaitReady)
 
     LaunchedEffect(Unit) {
-        // 1) Fade-In + Scale-Up خلال 1.5 ثانية
+        // 1) حركة ظهور اللوجو وتكبيره خلال 1.5 ثانية
         coroutineScope {
             launch { logoAlpha.animateTo(1f, tween(1500, easing = FastOutSlowInEasing)) }
             launch { logoScale.animateTo(1.05f, tween(1500, easing = FastOutSlowInEasing)) }
         }
-        // 2) Pulse Glow (نبضة واحدة ≈ 0.7 ثانية)
-        glow.animateTo(1f, tween(350, easing = FastOutSlowInEasing))
-        glow.animateTo(0.3f, tween(350, easing = FastOutSlowInEasing))
-
-        // 3) انتظار جاهزية البيانات (بحد أقصى محدد من المستدعي) قبل الانتقال،
-        // لضمان أن تكون الواجهة الرئيسية جاهزة تماماً للتفاعل فور اختفاء اللوغو.
+        
+        // 2) انتظار جاهزية البيانات (بدون حجب الشاشة)
         currentAwaitReady()
-
-        // 4) الانتقال
+        
+        // 3) الانتقال للواجهة الرئيسية
         currentOnFinished()
     }
 
@@ -69,27 +58,12 @@ fun SplashScreen(
             .background(SplashBackground),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(360.dp)) {
-            val radius = (110.dp.toPx()) + (40.dp.toPx() * glow.value)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        glowColor.copy(alpha = 0.40f * glow.value),
-                        Color.Transparent
-                    ),
-                    center = Offset(size.width / 2f, size.height / 2f),
-                    radius = radius
-                ),
-                radius = radius,
-                center = Offset(size.width / 2f, size.height / 2f)
-            )
-        }
-
+        // عرض اللوجو فقط بدون أي هالة أو ضوء
         Image(
             painter = painterResource(id = R.drawable.logo),
-            contentDescription = null,
+            contentDescription = "Sahra4Ever Logo",
             modifier = Modifier
-                .size(160.dp)
+                .size(160.dp) // حجم اللوجو
                 .scale(logoScale.value)
                 .alpha(logoAlpha.value)
         )
