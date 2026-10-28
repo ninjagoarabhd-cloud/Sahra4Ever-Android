@@ -53,7 +53,8 @@ private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
     Triple("حسابي", Icons.Outlined.Person, "account")
 )
 
-private const val NULL_SENTINEL = "null"
+// ✅ الحل الجذري: تغيير "null" إلى "none" لكي لا يعتقد أندرويد أنها قيمة فارغة
+private const val NULL_SENTINEL = "none"
 private const val DEFAULT_TITLE = "بدون عنوان"
 private const val DEFAULT_MEDIA_TYPE = "movie"
 
@@ -294,7 +295,9 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
                             season = historyItem.season,
                             episode = historyItem.episode,
                             autoPlay = true,
-                            posterPath = historyItem.posterPath
+                            posterPath = historyItem.posterPath,
+                            // ✅ الحل الجذري: تمرير صورة البوستر كخلفية مؤقتة لتفادي الانهيار
+                            backdropPath = historyItem.posterPath
                         )
                     )
                 },
