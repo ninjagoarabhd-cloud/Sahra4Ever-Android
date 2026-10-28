@@ -87,6 +87,24 @@ private fun emptyResponse() =
 private fun hostMatches(host: String, domains: List<String>) =
     domains.any { host == it || host.endsWith(".$it") }
 
+/**
+ * ✅ (إصلاح جذري للكراش)
+ * استدعاء activity.requestedOrientation = ... بشكل مباشر يرمي
+ * IllegalStateException: "Only fullscreen opaque activities can request orientation"
+ * في حالات شائعة جداً (نافذة غير opaque بسبب إعدادات edge-to-edge/شفافية جزئية،
+ * أو عندما يكون الجهاز في وضع Multi-Window / Split-Screen، أو Activity غير resizable).
+ * هذا بالضبط ما كان يُسقط التطبيق فور الدخول لشاشة المشغل.
+ * هذه الدالة تمتص الاستثناء بأمان تام دون التأثير على أي وظيفة أخرى.
+ */
+private fun safeSetOrientation(activity: Activity?, orientation: Int) {
+    if (activity == null || activity.isFinishing || activity.isDestroyed) return
+    try {
+        activity.requestedOrientation = orientation
+    } catch (e: Exception) {
+        Log.e(TAG, "Unable to set requestedOrientation safely", e)
+    }
+}
+
 private class PlayerWebViewClient(
     private val profile: ServerProfile,
     private val debug: Boolean,
@@ -197,9 +215,6 @@ private fun createPlayerWebView(
 
 /**
  * ✅ تدمير آمن وكامل للـ WebView.
- * هذا هو جوهر حل مشكلة الشاشة السوداء العالقة:
- * - إيقاف التحميل ووضع الصفحة على about:blank يمنع أي عمليات JS/وسائط معلّقة بالخلفية.
- * - إزالته من الـ parent قبل destroy() تمنع ترك View عالقة في شجرة الـ Window.
  */
 private fun destroyWebViewSafely(webView: WebView?) {
     webView ?: return
@@ -221,7 +236,6 @@ private fun destroyWebViewSafely(webView: WebView?) {
     }
 }
 
-/** الشريط العلوي (سهم رجوع + اسم العمل) — مستخرج لإعادة استخدامه في الوضع العادي وملء الشاشة. */
 @Composable
 private fun PlayerTopBar(title: String, onBack: () -> Unit) {
     Row(
@@ -254,9 +268,7 @@ fun PlayerScreen(
     val debug = remember { (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0 }
 
     val profile = SERVERS[initialServerIndex.coerceIn(SERVERS.indices)]
-    // الواجهة العربية داخل ملء الشاشة للسيرفر الأول (VsEmbed) فقط
     val isVsEmbed = profile === SERVERS[0]
-    // ✅ (تعديل جديد) السيرفر الرابع (vidsrc.wiki) يدعم تمرير ?sub=ar لتفعيل الترجمة العربية تلقائياً
     val isVidSrcWiki = profile.name == "Server 4"
     val url = remember(profile, mediaType, movieId, season, episode) {
         val base = if (mediaType == "tv") "${profile.baseUrl}tv/$movieId/$season/$episode"
@@ -268,7 +280,6 @@ fun PlayerScreen(
     var showOverlay by remember { mutableStateOf(true) }
     var customView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
-    // ✅ مرجع صريح للـ WebView الحالي كي نضمن تدميره الكامل عند مغادرة الشاشة
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
     LaunchedEffect(url) {
@@ -283,17 +294,15 @@ fun PlayerScreen(
         }
     }
 
-    // ✅ إدارة الاتجاه وأشرطة النظام + تنظيف شامل عند الخروج النهائي من الشاشة
+    // ✅ إدارة الاتجاه وأشرطة النظام + تنظيف شامل عند الخروج — الآن بشكل آمن تماماً من الكراش
     DisposableEffect(Unit) {
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        safeSetOrientation(activity, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+
         val controller = activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller?.hide(WindowInsetsCompat.Type.systemBars())
 
         onDispose {
-            // 1) إخفاء أي Custom View (فيديو ملء الشاشة) عالق أولاً عبر الـ callback الأصلي؛
-            //    هذه الخطوة ضرورية جداً وإلا يبقى الـ WebView "معتقداً" أنه في وضع fullscreen
-            //    حتى بعد destroy()، مما يترك طبقة سوداء عالقة في نافذة التطبيق.
             try {
                 customViewCallback?.onCustomViewHidden()
             } catch (e: Exception) {
@@ -302,12 +311,10 @@ fun PlayerScreen(
             customViewCallback = null
             customView = null
 
-            // 2) تدمير الـ WebView تدميراً كاملاً
             destroyWebViewSafely(webViewRef)
             webViewRef = null
 
-            // 3) إعادة الاتجاه وأشرطة النظام لوضعها الطبيعي
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            safeSetOrientation(activity, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
             controller?.show(WindowInsetsCompat.Type.systemBars())
         }
     }
@@ -331,8 +338,6 @@ fun PlayerScreen(
                     }
                 },
                 onRelease = { v ->
-                    // عند تغيّر الـ url (سيرفر آخر) يُستبدل الـ WebView القديم بآخر جديد،
-                    // تأكد من عدم مسح مرجع الـ WebView الحالي بالخطأ.
                     if (webViewRef === v) webViewRef = null
                     destroyWebViewSafely(v)
                 },
@@ -341,13 +346,12 @@ fun PlayerScreen(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { showOverlay = !showOverlay } // ✅ إظهار/إخفاء الشريط العلوي باللمس
+                    ) { showOverlay = !showOverlay }
             )
         }
 
         val cv = customView
 
-        // زر الرجوع في النظام يخرج من ملء الشاشة أولاً (بديل زر X المحذوف)
         BackHandler(enabled = cv != null) {
             customViewCallback?.onCustomViewHidden()
             customView = null
@@ -385,7 +389,6 @@ fun PlayerScreen(
                         ) { showOverlay = !showOverlay }
                 )
 
-                // الواجهة العربية داخل ملء الشاشة: السيرفر الأول فقط، تظهر باللمس وتختفي بعد 3 ثوانٍ
                 if (isVsEmbed) {
                     AnimatedVisibility(
                         visible = showOverlay,
@@ -399,7 +402,7 @@ fun PlayerScreen(
                                 customViewCallback?.onCustomViewHidden()
                                 customView = null
                                 customViewCallback = null
-                                onBack() // الخروج من السيرفر
+                                onBack()
                             }
                         )
                     }

@@ -2,6 +2,7 @@
 
 package com.sahra4ever.app
 
+import android.content.Context
 import android.util.LruCache
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -63,16 +64,22 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.util.Locale
 import kotlin.math.absoluteValue
@@ -85,7 +92,6 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
-// ✅ عتبة اعتبار الشاشة "جهاز لوحي" (Medium/Expanded) — لا تؤثر إطلاقاً على عرض الجوال العادي
 private val TABLET_BREAKPOINT = 600.dp
 
 private val CHIPS = listOf("أفلام", "مسلسلات", "أكشن وحركة", "دراما", "خيال علمي", "كوميدي", "مغامرة", "رعب")
@@ -109,8 +115,10 @@ private data class HomeData(
     val trending: List<Movie> = emptyList(),
     val topRated: List<Movie> = emptyList(),
     val nowPlaying: List<Movie> = emptyList(),
-    val airing: List<Movie> = emptyList(),
-    val anime: List<Movie> = emptyList()
+    // ✅ (تعديل 1) كان اسمه airing ويحمل نتائج tv/airing_today
+    val popularTv: List<Movie> = emptyList(),
+    // ✅ (تعديل 2) كان اسمه anime ويحمل نتائج discover/tv الخاصة بالأنمي
+    val awardWinning: List<Movie> = emptyList()
 )
 
 private object HomeCache {
@@ -122,6 +130,21 @@ private object HomeCache {
     fun put(d: HomeData) { data = d; savedAt = System.currentTimeMillis() }
 }
 
+/**
+ * ✅ (إصلاح دقيق) كاش "يُستهلك مرة واحدة فقط" (Single-Use Cache) لسجل المشاهدة.
+ */
+private object HistoryCache {
+    @Volatile private var data: List<WatchHistory>? = null
+
+    fun put(list: List<WatchHistory>) { data = list }
+
+    fun consumeOnce(): List<WatchHistory>? {
+        val snapshot = data
+        data = null
+        return snapshot
+    }
+}
+
 private val searchCache = LruCache<String, List<Movie>>(30)
 
 private fun List<Movie>.clean(type: String?): List<Movie> =
@@ -131,13 +154,6 @@ private fun List<Movie>.clean(type: String?): List<Movie> =
         .distinctBy { "${it.mediaType}-${it.id}" }
         .toList()
 
-/**
- * ✅ (الجلب المزدوج / Bilingual Fetch)
- * ينفذ طلبين متوازيين (ar-SA لجلب النصوص، en-US لجلب الصور) ثم يدمجهما:
- * يحتفظ بكل حقول النسخة العربية (العنوان، القصة...)، ويستبدل فقط posterPath/backdropPath
- * بما يقابلها من النسخة الإنجليزية إن وُجدت (لأن TMDB أحياناً لا يرجع صوراً مع اللغة العربية).
- * المطابقة تتم عبر مفتاح "mediaType-id" لضمان ربط كل عنصر بنظيره الصحيح.
- */
 private suspend fun fetchBilingual(
     arCall: suspend () -> MovieResponse,
     enCall: suspend () -> MovieResponse
@@ -162,7 +178,6 @@ private suspend fun fetchBilingual(
 private suspend fun fetchHome(): HomeData = coroutineScope {
     val api = TmdbClient.api
 
-    // ✅ heroes: trending/all/week ثنائي اللغة — movie/tv فقط + backdrop_path إلزامي + أول 5
     val heroesDeferred = async {
         tryOrNull {
             fetchBilingual(
@@ -176,7 +191,6 @@ private suspend fun fetchHome(): HomeData = coroutineScope {
             ?: emptyList()
     }
 
-    // ✅ trending: trending/all/day ثنائي اللغة — استبعاد person
     val trendingDeferred = async {
         tryOrNull {
             fetchBilingual(
@@ -195,25 +209,16 @@ private suspend fun fetchHome(): HomeData = coroutineScope {
         }?.clean("movie") ?: emptyList()
     }
 
-    val airingDeferred = async {
+    // ✅ (تعديل 1) "المسلسلات الأكثر شعبية": tv/popular بدلاً من tv/airing_today
+    val popularTvDeferred = async {
         tryOrNull {
             fetchBilingual(
-                { api.getAiringTodayTVShows(TMDB_API_KEY, "ar-SA") },
-                { api.getAiringTodayTVShows(TMDB_API_KEY, "en-US") }
+                { api.getPopularTvShows(TMDB_API_KEY, language = "ar-SA") },
+                { api.getPopularTvShows(TMDB_API_KEY, language = "en-US") }
             )
         }?.clean("tv") ?: emptyList()
     }
 
-    val animeDeferred = async {
-        tryOrNull {
-            fetchBilingual(
-                { api.getAnimeShows(TMDB_API_KEY, "ar-SA") },
-                { api.getAnimeShows(TMDB_API_KEY, "en-US") }
-            )
-        }?.clean("tv") ?: emptyList()
-    }
-
-    // ✅ topRated: discover/movie + discover/tv (ثنائي اللغة لكل منهما)، دمج وترتيب تنازلي، أفضل 20
     val topRatedDeferred = async {
         val moviesDeferred = async {
             tryOrNull {
@@ -236,18 +241,89 @@ private suspend fun fetchHome(): HomeData = coroutineScope {
             .take(20)
     }
 
+    /**
+     * ✅ (تعديل 2) "الأعمال الحائزة على جوائز" — بما أن TMDB لا يوفر فلتر جوائز مباشر،
+     * نعتمد معيار "الأعلى تقييماً من النقاد" بعتبة تصويت مرتفعة جداً (vote_count.gte = 2000)
+     * لضمان أنها أعمال ضخمة ومُشاهَدة على نطاق واسع ومُقيَّمة بإشادة حقيقية، وليست أعمالاً
+     * صغيرة حصلت على تقييم عالٍ من عدد قليل جداً من المصوّتين. يُعاد استخدام نفس دالتي
+     * discover الموجودتين أصلاً (getTopRatedMoviesDiscover / getTopRatedTvDiscover) مع
+     * تمرير voteCount=2000 صراحة، فيُدمَج الناتجان (أفلام + مسلسلات) ويُرتَّبان تنازلياً.
+     */
+    val awardWinningDeferred = async {
+        val moviesDeferred = async {
+            tryOrNull {
+                fetchBilingual(
+                    { api.getTopRatedMoviesDiscover(TMDB_API_KEY, voteCount = 2000, language = "ar-SA") },
+                    { api.getTopRatedMoviesDiscover(TMDB_API_KEY, voteCount = 2000, language = "en-US") }
+                )
+            }?.clean("movie") ?: emptyList()
+        }
+        val tvDeferred = async {
+            tryOrNull {
+                fetchBilingual(
+                    { api.getTopRatedTvDiscover(TMDB_API_KEY, voteCount = 2000, language = "ar-SA") },
+                    { api.getTopRatedTvDiscover(TMDB_API_KEY, voteCount = 2000, language = "en-US") }
+                )
+            }?.clean("tv") ?: emptyList()
+        }
+        (moviesDeferred.await() + tvDeferred.await())
+            .sortedByDescending { it.voteAverage?.toDouble() ?: 0.0 }
+            .take(20)
+    }
+
     val data = HomeData(
         heroes = heroesDeferred.await(),
         trending = trendingDeferred.await(),
         topRated = topRatedDeferred.await(),
         nowPlaying = nowPlayingDeferred.await(),
-        airing = airingDeferred.await(),
-        anime = animeDeferred.await()
+        popularTv = popularTvDeferred.await(),
+        awardWinning = awardWinningDeferred.await()
     )
-    if (data.heroes.isEmpty() && data.trending.isEmpty() && data.nowPlaying.isEmpty() && data.airing.isEmpty() && data.anime.isEmpty()) {
+    if (data.heroes.isEmpty() && data.trending.isEmpty() && data.nowPlaying.isEmpty() && data.popularTv.isEmpty() && data.awardWinning.isEmpty()) {
         throw IOException("no data")
     }
     data
+}
+
+/**
+ * ✅ (إصلاح تقطّع الأنيميشن وتأخر الواجهة)
+ * يبدأ تهيئة البيانات الثقيلة (مفضلة + سجل مشاهدة + بيانات الرئيسية) في Scope
+ * مستقل عن أي Composable، على Dispatchers.IO، بالتوازي التام مع أنيميشن اللوغو.
+ * يُستدعى من MainActivity.onCreate قبل setContent.
+ */
+object HomeDataInitializer {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _ready = MutableStateFlow(false)
+    val ready: StateFlow<Boolean> = _ready
+
+    @Volatile private var started = false
+
+    fun start(context: Context) {
+        if (started) return
+        started = true
+        appScope.launch {
+            runCatching { FavoritesManager.init(context) }
+
+            val historyDeferred = async {
+                runCatching {
+                    HistoryManager.getHistory(context).distinctBy { "${it.type}-${it.id}" }
+                }.getOrDefault(emptyList())
+            }
+            val homeDeferred = async { runCatching { fetchHome() }.getOrNull() }
+
+            HistoryCache.put(historyDeferred.await())
+            homeDeferred.await()?.let { HomeCache.put(it) }
+
+            _ready.value = true
+        }
+    }
+
+    suspend fun awaitReady(timeoutMs: Long = 4000L) {
+        if (_ready.value) return
+        withTimeoutOrNull(timeoutMs) {
+            ready.first { it }
+        }
+    }
 }
 
 private fun progressOf(item: WatchHistory): Float = 0.4f
@@ -290,19 +366,23 @@ private fun HomeContent(
     var searching by remember { mutableStateOf(false) }
     val colors = remember { mutableStateMapOf<Int, Color>() }
 
-    // ✅ تهيئة نظام المفضلة مبكراً (آمنة للاستدعاء المتكرر)
     LaunchedEffect(Unit) {
-        FavoritesManager.init(context)
+        withContext(Dispatchers.IO) { FavoritesManager.init(context) }
     }
 
     LaunchedEffect(Unit) {
-        history = withContext(Dispatchers.IO) {
-            HistoryManager.getHistory(context).distinctBy { "${it.type}-${it.id}" }
-        }
+        history = HistoryCache.consumeOnce()
+            ?: withContext(Dispatchers.IO) {
+                HistoryManager.getHistory(context).distinctBy { "${it.type}-${it.id}" }
+            }
     }
 
     LaunchedEffect(reloadKey) {
-        if (reloadKey == 0 && HomeCache.fresh() != null) return@LaunchedEffect
+        if (reloadKey == 0 && HomeCache.fresh() != null) {
+            home = HomeCache.fresh()!!
+            loading = false
+            return@LaunchedEffect
+        }
         val hadData = home.trending.isNotEmpty()
         if (!hadData) loading = true
         error = false
@@ -361,14 +441,10 @@ private fun HomeContent(
         }
     }
 
-    // ✅ (Optimistic UI) تمرير poster/backdrop/voteAverage الموجودة فعلاً في كائن Movie
-    // لتُستخدم كعرض أولي فوري في DetailsScreen دون أي طلب شبكة إضافي
     val movieClick = remember(onMovieClick) {
         { m: Movie -> onMovieClick(m.id, m.mediaType ?: "movie", m.displayTitle(), m.posterPath, m.backdropPath, m.voteAverage) }
     }
 
-    // ✅ (دعم الأجهزة اللوحية) BoxWithConstraints يسمح بمعرفة عرض الشاشة الفعلي
-    // دون أي تأثير على تصميم الجوال (isTablet = false يحافظ على نفس القيم الأصلية تماماً)
     BoxWithConstraints(Modifier.fillMaxSize().background(Ink)) {
         val isTablet = maxWidth >= TABLET_BREAKPOINT
 
@@ -388,7 +464,12 @@ private fun HomeContent(
                     Button(onClick = { reloadKey++ }, colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Color.White)) { Text("إعادة المحاولة") }
                 }
                 else -> HomeFeed(
-                    heroes = heroes, rest = rest, topRated = home.topRated, nowPlaying = home.nowPlaying, airing = home.airing, anime = home.anime,
+                    heroes = heroes,
+                    rest = rest,
+                    topRated = home.topRated,
+                    nowPlaying = home.nowPlaying,
+                    popularTv = home.popularTv,
+                    awardWinning = home.awardWinning,
                     history = history, pagerState = pagerState, listState = listState,
                     onChip = onCategoryClick, onMovieClick = movieClick, onContinue = onContinueWatchingClick,
                     isTablet = isTablet
@@ -406,7 +487,6 @@ private fun AmbientBackground(heroes: List<Movie>, pagerState: PagerState, color
     Box(modifier.drawBehind { drawRect(Brush.verticalGradient(listOf(top, bottom))) })
 }
 
-/** ✅ (نقطة 3) الشريط العلوي الجديد: اللوغو + (صورة الحساب واسمه) + زر قائمتي — بدون جرس/تحميل/Cast */
 @Composable
 private fun Header(onMyListClick: () -> Unit) {
     val user by AuthManager.user.collectAsState()
@@ -473,7 +553,12 @@ private fun SearchBar(query: String, onChange: (String) -> Unit, focusRequester:
 
 @Composable
 private fun HomeFeed(
-    heroes: List<Movie>, rest: List<Movie>, topRated: List<Movie>, nowPlaying: List<Movie>, airing: List<Movie>, anime: List<Movie>,
+    heroes: List<Movie>,
+    rest: List<Movie>,
+    topRated: List<Movie>,
+    nowPlaying: List<Movie>,
+    popularTv: List<Movie>,
+    awardWinning: List<Movie>,
     history: List<WatchHistory>, pagerState: PagerState, listState: LazyListState,
     onChip: (String) -> Unit, onMovieClick: (Movie) -> Unit, onContinue: (WatchHistory) -> Unit,
     isTablet: Boolean
@@ -514,13 +599,13 @@ private fun HomeFeed(
         movieRow("trending", "الترند الآن", rest, onMovieClick, isTablet)
         movieRow("top_rated", "الأعمال الأعلى تقييماً", topRated, onMovieClick, isTablet)
         movieRow("now", "وصل حديثاً للسينما", nowPlaying, onMovieClick, isTablet)
-        movieRow("airing", "جديد المسلسلات", airing, onMovieClick, isTablet)
-        movieRow("anime", "عالم الأنمي", anime, onMovieClick, isTablet)
+        // ✅ (تعديل 1) العنوان الجديد
+        movieRow("popular_tv", "المسلسلات الأكثر شعبية", popularTv, onMovieClick, isTablet)
+        // ✅ (تعديل 2) العنوان الجديد
+        movieRow("award_winning", "الأعمال الحائزة على جوائز", awardWinning, onMovieClick, isTablet)
     }
 }
 
-/** ✅ (دعم الأجهزة اللوحية) عرض كرت أكبر قليلاً + تباعد أوسع فقط عندما isTablet=true؛
- * على الجوال (isTablet=false) القيم مطابقة تماماً للأصل (120.dp / 8.dp). */
 private fun LazyListScope.movieRow(id: String, title: String, list: List<Movie>, onClick: (Movie) -> Unit, isTablet: Boolean) {
     if (list.isEmpty()) return
     item(key = "$id-title", contentType = "title") { SectionTitle(title) }
@@ -552,7 +637,6 @@ private fun Chips(onSelect: (String) -> Unit) {
     }
 }
 
-/** ✅ (نقطة 2) زر "قائمتي" أصبح فعّالاً بالكامل: يبدّل بين + و ✓ ويضيف/يحذف من المفضلة فوراً */
 @Composable
 private fun HeroCard(movie: Movie, onClick: () -> Unit, dim: () -> Float, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -670,8 +754,6 @@ private fun PosterCard(movie: Movie, modifier: Modifier = Modifier, onClick: () 
     }
 }
 
-/** ✅ (دعم الأجهزة اللوحية) عدد أعمدة الشبكة يزداد على الشاشات الكبيرة فقط؛
- * على الجوال يبقى 3 أعمدة تماماً كما كان. */
 @Composable
 private fun SearchResults(results: List<Movie>, searching: Boolean, onMovieClick: (Movie) -> Unit, isTablet: Boolean) {
     Box(Modifier.fillMaxSize()) {

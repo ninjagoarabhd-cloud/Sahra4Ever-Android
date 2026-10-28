@@ -27,6 +27,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,21 @@ private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
 
 private const val NULL_SENTINEL = "null"
 
+/**
+ * ✅ (تحصين ضد الكراش) فك تشفير آمن لمعاملات الـ Navigation.
+ * في حال وصل أي نص بتنسيق percent-encoding غير سليم (نادر لكن ممكن)،
+ * Uri.decode يرمي IllegalArgumentException ويُسقط التطبيق فوراً.
+ * هذه الدالة تمتص الخطأ وتُرجع قيمة افتراضية آمنة بدلاً من الكراش.
+ */
+private fun safeDecode(value: String?, fallback: String = ""): String {
+    if (value == null) return fallback
+    return try {
+        Uri.decode(value)
+    } catch (e: Exception) {
+        fallback
+    }
+}
+
 private fun buildDetailsRoute(
     movieId: Int,
     mediaType: String,
@@ -77,23 +93,42 @@ private fun buildDetailsRoute(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // ✅ (إصلاح تقطّع الأنيميشن) تبدأ تهيئة البيانات في الخلفية فوراً،
+        // قبل حتى استدعاء setContent، وبمعزل تام عن دورة حياة الـ Compose.
+        // هذا يضمن أن جلب الشبكة وقراءة الذاكرة يعملان على Dispatchers.IO
+        // بالتوازي مع أنيميشن اللوغو دون أي منافسة على الـ Main Thread.
+        HomeDataInitializer.start(applicationContext)
+
         setContent {
             MaterialTheme {
                 var showSplash by rememberSaveable { mutableStateOf(true) }
+                // ✅ لا يتم تركيب (compose) شجرة AppRoot الثقيلة إطلاقاً
+                // إلا بعد انتهاء أنيميشن اللوغو، فيحصل اللوغو على كامل
+                // موارد الـ Main Thread لنفسه ويعمل بسلاسة 60fps.
+                var mountApp by remember { mutableStateOf(false) }
 
-                // ✅ التعديل الجديد: استخدام Box لتشغيل التطبيق واللوغو معاً
                 Box(modifier = Modifier.fillMaxSize()) {
-                    
-                    // 1. الواجهة الرئيسية تبدأ العمل فوراً وتجلب البيانات في الخلفية
-                    AppRoot()
 
-                    // 2. اللوغو يظهر فوق الواجهة ويختفي بتأثير تلاشي (Fade Out)
+                    if (mountApp) {
+                        AppRoot()
+                    }
+
                     AnimatedVisibility(
                         visible = showSplash,
                         enter = fadeIn(animationSpec = tween(300)),
                         exit = fadeOut(animationSpec = tween(500))
                     ) {
-                        SplashScreen(onFinished = { showSplash = false })
+                        SplashScreen(
+                            // ✅ ينتظر جاهزية البيانات (بدون حجب الـ Main Thread، مجرد suspend)
+                            // مع سقف زمني أقصى حتى لا يتجمد اللوغو في حال بطء الشبكة
+                            awaitReady = { HomeDataInitializer.awaitReady(timeoutMs = 4000L) },
+                            onFinished = {
+                                // تركيب الواجهة الحقيقية يبدأ بالتزامن مع بداية تلاشي اللوغو
+                                mountApp = true
+                                showSplash = false
+                            }
+                        )
                     }
                 }
             }
@@ -221,7 +256,6 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         composable("mylist") {
             MyListScreen(
                 onBack = { navController.popBackStack() },
-                // ✅ تم التعديل هنا: توحيد التوقيع مع onMovieClick الجديد في MyListScreen (6 متغيرات)
                 onMovieClick = { id, type, title, poster, backdrop, vote ->
                     navController.navigate(
                         buildDetailsRoute(
@@ -251,7 +285,7 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             route = "search/{category}",
             arguments = listOf(navArgument("category") { type = NavType.StringType })
         ) { backStackEntry ->
-            val category = Uri.decode(backStackEntry.arguments?.getString("category") ?: "الكل")
+            val category = safeDecode(backStackEntry.arguments?.getString("category"), "الكل")
             SearchScreen(
                 initialCategory = category,
                 onBack = { navController.popBackStack() },
@@ -285,12 +319,12 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
             val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
-            val title = Uri.decode(backStackEntry.arguments?.getString("title") ?: "بدون عنوان")
+            val title = safeDecode(backStackEntry.arguments?.getString("title"), "بدون عنوان")
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
-            val posterRaw = Uri.decode(backStackEntry.arguments?.getString("poster") ?: NULL_SENTINEL)
-            val backdropRaw = Uri.decode(backStackEntry.arguments?.getString("backdrop") ?: NULL_SENTINEL)
+            val posterRaw = safeDecode(backStackEntry.arguments?.getString("poster"), NULL_SENTINEL)
+            val backdropRaw = safeDecode(backStackEntry.arguments?.getString("backdrop"), NULL_SENTINEL)
             val voteRaw = backStackEntry.arguments?.getString("vote")?.toDoubleOrNull() ?: 0.0
 
             DetailsScreen(
@@ -322,7 +356,7 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
             val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
-            val title = Uri.decode(backStackEntry.arguments?.getString("title") ?: "بدون عنوان")
+            val title = safeDecode(backStackEntry.arguments?.getString("title"), "بدون عنوان")
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val serverIndex = backStackEntry.arguments?.getInt("serverIndex") ?: 0

@@ -27,17 +27,23 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 private val SplashBackground = Color(0xFF0D0F14)
-private val DefaultGlowColor = Color(0xFFE5A93C) // غيّره ليناسب ألوان شعارك
+private val DefaultGlowColor = Color(0xFFE5A93C)
 
 @Composable
 fun SplashScreen(
     glowColor: Color = DefaultGlowColor,
+    // ✅ (إصلاح تأخر الواجهة) دالة suspend اختيارية تُستدعى بعد انتهاء الأنيميشن
+    // لانتظار جاهزية بيانات الواجهة الرئيسية. لأنها suspend فهي لا تحجب
+    // الـ Main Thread إطلاقاً (مجرد تعليق تعاوني للـ coroutine)، لذا لا تؤثر
+    // على سلاسة أي رسم، وتضمن أن الواجهة تكون جاهزة فوراً عند اختفاء اللوغو.
+    awaitReady: suspend () -> Unit = {},
     onFinished: () -> Unit
 ) {
     val logoAlpha = remember { Animatable(0f) }
     val logoScale = remember { Animatable(0.8f) }
     val glow = remember { Animatable(0f) }
     val currentOnFinished by rememberUpdatedState(onFinished)
+    val currentAwaitReady by rememberUpdatedState(awaitReady)
 
     LaunchedEffect(Unit) {
         // 1) Fade-In + Scale-Up خلال 1.5 ثانية
@@ -45,10 +51,15 @@ fun SplashScreen(
             launch { logoAlpha.animateTo(1f, tween(1500, easing = FastOutSlowInEasing)) }
             launch { logoScale.animateTo(1.05f, tween(1500, easing = FastOutSlowInEasing)) }
         }
-        // 2) Pulse Glow (نبضة واحدة ≈ 0.7 ثانية) — اجعلها 0 لو أردت الانتقال فور 1.5 ثانية
+        // 2) Pulse Glow (نبضة واحدة ≈ 0.7 ثانية)
         glow.animateTo(1f, tween(350, easing = FastOutSlowInEasing))
         glow.animateTo(0.3f, tween(350, easing = FastOutSlowInEasing))
-        // 3) الانتقال
+
+        // 3) انتظار جاهزية البيانات (بحد أقصى محدد من المستدعي) قبل الانتقال،
+        // لضمان أن تكون الواجهة الرئيسية جاهزة تماماً للتفاعل فور اختفاء اللوغو.
+        currentAwaitReady()
+
+        // 4) الانتقال
         currentOnFinished()
     }
 
@@ -58,7 +69,6 @@ fun SplashScreen(
             .background(SplashBackground),
         contentAlignment = Alignment.Center
     ) {
-        // هالة الإضاءة خلف الشعار
         Canvas(modifier = Modifier.size(360.dp)) {
             val radius = (110.dp.toPx()) + (40.dp.toPx() * glow.value)
             drawCircle(
