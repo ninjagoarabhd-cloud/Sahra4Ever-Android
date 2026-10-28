@@ -59,6 +59,8 @@ private val BottomNavItems: List<Triple<String, ImageVector, String>> = listOf(
 )
 
 private const val NULL_SENTINEL = "null"
+private const val DEFAULT_TITLE = "بدون عنوان"
+private const val DEFAULT_MEDIA_TYPE = "movie"
 
 /**
  * فك تشفير آمن لمعاملات بسيطة (مثل category) لا تحتاج Base64.
@@ -73,15 +75,9 @@ private fun safeDecode(value: String?, fallback: String = ""): String {
 }
 
 /**
- * ✅ (إصلاح الكراش الجذري) ترميز آمن تماماً بـ Base64 (URL-safe, بدون padding).
- *
- * المشكلة الأصلية: posterPath/backdropPath القادمة من TMDB تبدأ دائماً بـ "/"
- * (مثل "/abc.jpg")، وبعض العناوين قد تحتوي "/" أيضاً. حتى مع Uri.encode،
- * آلية مطابقة الأنماط الداخلية في Navigation Compose (التي تتعامل مع الـ
- * route كأنه Uri كامل) قد تتعثر وتُسقط التطبيق فوراً.
- *
- * Base64 (URL_SAFE) ينتج فقط [A-Za-z0-9_-]، أي لا يحتوي أبداً على "/" أو "%"
- * أو أي رمز قد يُفسَّر كفاصل مسار، فيُزيل المشكلة من جذورها بشكل كامل.
+ * ترميز آمن تماماً بـ Base64 (URL-safe, بدون padding) — يُنتج فقط
+ * [A-Za-z0-9_-]، أي لا يحتوي أبداً على "/" أو "%" التي كانت تسبب
+ * تعارضاً في مطابقة أنماط Navigation Compose.
  */
 private fun encodeSegment(value: String?): String {
     if (value.isNullOrBlank()) return NULL_SENTINEL
@@ -104,9 +100,8 @@ private fun decodeSegment(value: String?): String? {
 }
 
 /**
- * ✅ تمتص كل أحداث اللمس (نقر/سحب/تمرير) ولا تسمح لها بالمرور لأي عنصر
- * أسفلها. تُستخدم فوق AppRoot أثناء ظهور السبلاش لمنع تسرّب اللمسات
- * إلى الواجهة الحقيقية المُركَّبة أسفله.
+ * يمتص كل أحداث اللمس ولا تسمح لها بالمرور لأي عنصر أسفلها.
+ * تُستخدم فوق AppRoot أثناء ظهور السبلاش.
  */
 private fun Modifier.blockAllTouches(): Modifier = this.pointerInput(Unit) {
     awaitPointerEventScope {
@@ -117,10 +112,26 @@ private fun Modifier.blockAllTouches(): Modifier = this.pointerInput(Unit) {
     }
 }
 
+/**
+ * ✅ (إصلاح كراش "متابعة المشاهدة") هذه الدالة تقبل الآن title وmediaType
+ * كـ Nullable (String?) بدلاً من افتراض أنهما دائماً غير فارغين.
+ *
+ * السبب: Gson يتجاوز نظام null-safety الخاص بـ Kotlin عند التحويل من JSON.
+ * فحتى لو كان WatchHistory.title مُعرَّفاً كـ String (غير قابل للـ null)
+ * في الكود، فإن سجلات قديمة/تالفة في SharedPreferences (محفوظة بإصدار
+ * سابق لا يحتوي هذا الحقل، أو JSON معطوب) تجعل Gson يضع null فعلياً في
+ * وقت التشغيل رغم تعريف النوع. أي استخدام مباشر مثل title.ifBlank{...}
+ * كان يرمي NullPointerException فوراً ويُسقط التطبيق.
+ *
+ * الحل: معاملة title وmediaType كـ Nullable دائماً هنا (بغض النظر عمّا
+ * يقوله الـ compiler عن النوع المصدر)، مع قيمة افتراضية آمنة لكل منهما.
+ * هذا يحمي جميع نقاط الاستدعاء (home, mylist, search, continue watching)
+ * من نقطة واحدة مركزية.
+ */
 private fun buildDetailsRoute(
     movieId: Int,
-    mediaType: String,
-    title: String,
+    mediaType: String?,
+    title: String?,
     season: Int = 1,
     episode: Int = 1,
     autoPlay: Boolean = false,
@@ -128,19 +139,22 @@ private fun buildDetailsRoute(
     backdropPath: String? = null,
     voteAverage: Double? = null
 ): String {
-    val titleSeg = encodeSegment(title.ifBlank { "بدون عنوان" })
+    val safeTitle = title?.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE
+    val safeMediaType = mediaType?.takeIf { it.isNotBlank() } ?: DEFAULT_MEDIA_TYPE
+    val safeSeason = if (season > 0) season else 1
+    val safeEpisode = if (episode > 0) episode else 1
+
+    val titleSeg = encodeSegment(safeTitle)
     val posterSeg = encodeSegment(posterPath)
     val backdropSeg = encodeSegment(backdropPath)
     val voteSeg = (voteAverage ?: 0.0).toString()
-    return "details/$movieId/$mediaType/$titleSeg/$season/$episode/$autoPlay/$posterSeg/$backdropSeg/$voteSeg"
+    return "details/$movieId/$safeMediaType/$titleSeg/$safeSeason/$safeEpisode/$autoPlay/$posterSeg/$backdropSeg/$voteSeg"
 }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ✅ تهيئة البيانات تبدأ فوراً في الخلفية (Dispatchers.IO)، بمعزل
-        // تام عن دورة حياة الـ Compose، بالتوازي مع كل شيء آخر.
         HomeDataInitializer.start(applicationContext)
 
         setContent {
@@ -149,12 +163,6 @@ class MainActivity : ComponentActivity() {
 
                 Box(modifier = Modifier.fillMaxSize()) {
 
-                    // ✅ (إصلاح التجمد) تُركَّب AppRoot فوراً منذ أول إطار،
-                    // لكنها تبقى مخفية بالكامل خلف السبلاش المعتم. هذا يمنح
-                    // Compose كامل مدة أنيميشن اللوغو (ثانية أو أكثر) لبناء
-                    // الشجرة الثقيلة (Pager/LazyColumn/صور Coil) تدريجياً عبر
-                    // عشرات الإطارات، بدلاً من تكديس كل التكلفة دفعة واحدة في
-                    // اللحظة التي يختفي فيها اللوغو (وهو ما كان يسبب التجمد).
                     AppRoot()
 
                     AnimatedVisibility(
@@ -165,12 +173,9 @@ class MainActivity : ComponentActivity() {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                // ✅ يمنع أي تفاعل مع AppRoot المُركَّبة أسفلها
-                                // طالما السبلاش ظاهر على الشاشة.
                                 .blockAllTouches()
                         ) {
                             SplashScreen(
-                                // ينتظر جاهزية البيانات بدون حجب الـ Main Thread
                                 awaitReady = { HomeDataInitializer.awaitReady(timeoutMs = 4000L) },
                                 onFinished = {
                                     showSplash = false
@@ -281,11 +286,17 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
                     )
                 },
                 onContinueWatchingClick = { historyItem ->
+                    // ✅ تحصين إضافي عند نقطة الاستدعاء (دفاع من طبقتين):
+                    // حتى لو كانت البيانات المخزَّنة قديمة/تالفة ويحمل
+                    // الكائن title أو type قيمة null فعلياً وقت التشغيل
+                    // (رغم أن Kotlin "يعتقد" أنها String غير قابلة للـ null)،
+                    // فإن buildDetailsRoute أصبحت الآن تتعامل معها كـ Nullable
+                    // داخلياً، وهنا نضيف طبقة حماية إضافية صريحة أيضاً.
                     navController.navigate(
                         buildDetailsRoute(
                             movieId = historyItem.id,
-                            mediaType = historyItem.type,
-                            title = historyItem.title,
+                            mediaType = (historyItem.type as String?) ?: DEFAULT_MEDIA_TYPE,
+                            title = (historyItem.title as String?) ?: DEFAULT_TITLE,
                             season = historyItem.season,
                             episode = historyItem.episode,
                             autoPlay = true,
@@ -366,9 +377,8 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             )
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
-            val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
-            // ✅ فك تشفير Base64 بدلاً من Uri.decode لتفادي أي تعارض مع "/"
-            val title = decodeSegment(backStackEntry.arguments?.getString("title")) ?: "بدون عنوان"
+            val mediaType = backStackEntry.arguments?.getString("mediaType") ?: DEFAULT_MEDIA_TYPE
+            val title = decodeSegment(backStackEntry.arguments?.getString("title")) ?: DEFAULT_TITLE
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
@@ -388,7 +398,7 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
                 autoShowServers = autoPlay,
                 onBack = { navController.popBackStack() },
                 onPlayClick = { id, type, t, s, e, serverIndex ->
-                    val titleSeg = encodeSegment(t.ifBlank { "بدون عنوان" })
+                    val titleSeg = encodeSegment(t.takeIf { it.isNotBlank() } ?: DEFAULT_TITLE)
                     navController.navigate("player/$id/$type/$titleSeg/$s/$e/$serverIndex")
                 }
             )
@@ -405,8 +415,8 @@ private fun AppNavHost(navController: NavHostController, modifier: Modifier = Mo
             )
         ) { backStackEntry ->
             val movieId = backStackEntry.arguments?.getInt("movieId") ?: 0
-            val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
-            val title = decodeSegment(backStackEntry.arguments?.getString("title")) ?: "بدون عنوان"
+            val mediaType = backStackEntry.arguments?.getString("mediaType") ?: DEFAULT_MEDIA_TYPE
+            val title = decodeSegment(backStackEntry.arguments?.getString("title")) ?: DEFAULT_TITLE
             val season = backStackEntry.arguments?.getInt("season") ?: 1
             val episode = backStackEntry.arguments?.getInt("episode") ?: 1
             val serverIndex = backStackEntry.arguments?.getInt("serverIndex") ?: 0
