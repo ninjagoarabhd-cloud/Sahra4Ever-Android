@@ -60,6 +60,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -77,7 +78,6 @@ private val GlassFill = Color.White.copy(alpha = 0.12f)
 private val GlassStroke = Color.White.copy(alpha = 0.22f)
 private val Muted = Color(0xFFD0CFDA)
 
-// ✅ عتبة اعتبار الشاشة "جهاز لوحي" + أقصى عرض للمحتوى على الشاشات الكبيرة
 private val TABLET_BREAKPOINT = 600.dp
 private val DETAILS_MAX_WIDTH = 800.dp
 
@@ -103,20 +103,11 @@ private data class DetailsUi(
     val rating: Double?,
     val date: String?,
     val seasons: List<Season>? = null,
-    // ✅ (Optimistic UI) true فقط عندما تكون هذه بيانات أولية جزئية جاءت من الشاشة السابقة
-    // عبر Navigation، قبل اكتمال طلب الشبكة الحقيقي. لا تُستخدم أبداً للبيانات القادمة من fetchDetails.
     val isPlaceholder: Boolean = false
 )
 
-// ✅ (منع إعادة الجلب) ذاكرة تخزين مؤقت بسيطة بمفتاح "mediaType-id" لتفادي إعادة طلب
-// نفس الفيلم/المسلسل من الشبكة في كل مرة يُفتح فيها خلال نفس جلسة التطبيق.
 private val detailsCache = LruCache<String, DetailsUi>(20)
 
-/**
- * ✅ (الجلب المتوازي) الآن تُنفَّذ طلبات ar-SA و en-US معاً عبر async/await بدل التسلسل،
- * مع السماح بنجاح أحدهما حتى لو فشل الآخر (tryOrNull) بدل فشل العملية بالكامل.
- * الصور تُفضَّل من en-US (نفس منطق الصفحة الرئيسية)، والنصوص تُفضَّل من ar-SA.
- */
 private suspend fun fetchDetails(id: Int, mediaType: String): DetailsUi = coroutineScope {
     val api = TmdbClient.api
 
@@ -184,8 +175,6 @@ private suspend fun extractColor(context: Context, url: String?): Color? {
 fun DetailsScreen(
     movieId: Int,
     mediaType: String,
-    // ✅ (Optimistic UI) بيانات أولية قادمة من الشاشة السابقة (الرئيسية/متابعة المشاهدة) عبر Navigation.
-    // تُستخدم لعرض فوري (عنوان + صورة + تقييم) في أول فريم، قبل اكتمال طلب الشبكة الحقيقي.
     initialTitle: String? = null,
     initialPoster: String? = null,
     initialBackdrop: String? = null,
@@ -199,9 +188,6 @@ fun DetailsScreen(
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         val context = LocalContext.current
 
-        // ✅ (Optimistic UI + Cache) فحص متزامن للكاش عند التهيئة، وإلا بناء بيانات مؤقتة
-        // من initialTitle/initialPoster/initialBackdrop/initialVoteAverage إن توفرت.
-        // هذا يضمن عدم وجود أي وميض فارغ (شاشة سوداء) عند أول دخول أو عند العودة لنفس الفيلم لاحقاً.
         var ui by remember(movieId, mediaType) {
             val cached = detailsCache.get("$mediaType-$movieId")
             mutableStateOf(
@@ -231,16 +217,18 @@ fun DetailsScreen(
         var selectedSeason by remember { mutableStateOf<Season?>(null) }
         var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
         var selectedEpisodeNumber by remember { mutableIntStateOf(initialEpisode) }
-        val sheetState = rememberModalBottomSheetState()
 
-        // ✅ حالتان منفصلتان لمنع تداخل الإعلانات لنفس العمل:
-        // - hasShownAdForCurrentMedia: شاهد إعلاناً بينياً (سيرفر 2/3/4) أو أُعفي منه.
-        // - isVipUnlockedForCurrentMedia: فتح السيرفر VIP بإعلان مكافأة أو أُعفي منه.
-        // إذا تحقق أيٌّ منهما، لا يُطلب من المستخدم أي إعلان إضافي لباقي السيرفرات لنفس العمل.
+        // ✅ (إصلاح الكراش) تم فصل حالتَي الـ Sheet بدلاً من مشاركة نفس
+        // sheetState بين شيت المواسم وشيت السيرفرات. مشاركة نفس الكائن بين
+        // مكونين منفصلين من ModalBottomSheet (حتى لو لم يظهرا معاً أبداً في
+        // نفس اللحظة حالياً) ممارسة غير آمنة في Material3 وقد تُسبب تضارباً
+        // داخلياً في حساب الـ anchors الخاصة بكل منهما مستقبلاً.
+        val seasonSheetState = rememberModalBottomSheetState()
+        val serverSheetState = rememberModalBottomSheetState()
+
         var hasShownAdForCurrentMedia by rememberSaveable(movieId, mediaType) { mutableStateOf(false) }
         var isVipUnlockedForCurrentMedia by rememberSaveable(movieId, mediaType) { mutableStateOf(false) }
 
-        // ✅ (نقطة 4) نظام المفضلة: تهيئة + مراقبة الحالة الحيّة
         LaunchedEffect(Unit) {
             UnityAdsManager.initialize(context)
             FavoritesManager.init(context)
@@ -258,7 +246,6 @@ fun DetailsScreen(
             val cacheKey = "$mediaType-$movieId"
             val cachedUi = if (reloadKey == 0) detailsCache.get(cacheKey) else null
             if (cachedUi != null) {
-                // ✅ عودة لنفس الفيلم خلال نفس الجلسة: بيانات كاملة فوراً بدون أي طلب شبكة
                 ui = cachedUi
                 isFullyLoaded = true
                 if (accent == null) {
@@ -269,8 +256,6 @@ fun DetailsScreen(
                 return@LaunchedEffect
             }
 
-            // ✅ لا يوجد كاش: استخرج لون الخلفية فوراً من بيانات العرض الأولي (إن وُجدت)
-            // كي لا تنتظر الخلفية طلب الشبكة الكامل لتظهر بلون مناسب للفيلم.
             val seedImg = initialBackdrop ?: initialPoster
             if (seedImg != null) {
                 launch(Dispatchers.IO) {
@@ -294,8 +279,28 @@ fun DetailsScreen(
             }
         }
 
+        // ✅ (الإصلاح الجذري للكراش) تم فصل "إطار استقرار الـ layout" عن
+        // "إطار فتح ModalBottomSheet" بفاصل زمني قصير.
+        //
+        // السبب الحقيقي للكراش: isFullyLoaded يتحول إلى true في نفس اللحظة
+        // بالضبط التي ينتقل فيها `ui` من بيانات placeholder (نص "جاري
+        // التحميل") إلى المحتوى الكامل الحقيقي. هذا يُسبب إعادة قياس (layout)
+        // ضخمة وغير مستقرة لشجرة DetailsBody بأكملها. إذا فُتح ModalBottomSheet
+        // في نفس هذا الإطار تحديداً (كما كان يحدث سابقاً)، يحاول Material3
+        // حساب anchors الشيت بينما القياسات المحيطة غير مستقرة بعد، مما يرمي:
+        // IllegalArgumentException: "The initial value must have an associated anchor"
+        // ويُسقط التطبيق فوراً.
+        //
+        // هذا يفسّر تماماً لماذا الفتح العادي (autoShowServers=false) لا يتأثر
+        // أبداً: المستخدم يضغط "شاهد الآن" يدوياً بعد استقرار الـ layout بوقت
+        // طويل، فلا يوجد أي تزامن خطير بين الحدثين.
+        //
+        // الحل: تأخير بسيط (300ms) غير محسوس تقريباً يفصل بين الإطارين،
+        // فيُتاح لـ Compose وقت كافٍ لإنهاء إعادة القياس الكبيرة قبل تركيب
+        // الشيت، بدلاً من تكديس الحدثين في نفس الإطار.
         LaunchedEffect(autoShowServers, isFullyLoaded) {
             if (autoShowServers && isFullyLoaded) {
+                delay(300)
                 val d = ui
                 if (mediaType == "tv") {
                     val targetSeason = d?.seasons?.find { it.seasonNumber == initialSeason }
@@ -314,9 +319,6 @@ fun DetailsScreen(
             episodes = List(season.episodeCount ?: 1) { Episode(it + 1, "الحلقة ${it + 1}", "") }
         }
 
-        // ✅ (منطق الإعلانات الجديد) السيرفر الأول (VIP) يستخدم إعلان مكافأة إجباري الاكتمال؛
-        // السيرفرات 2/3/4 تستخدم الإعلان البيني القديم. كلاهما يُعفي الآخر لنفس العمل كي لا
-        // يُجبر المستخدم على مشاهدة إعلانين للفيلم/المسلسل نفسه.
         fun openServer(index: Int) {
             val currentTitle = ui?.title ?: ""
             val currentPoster = ui?.posterPath
@@ -332,9 +334,7 @@ fun DetailsScreen(
             }
 
             if (index == 0) {
-                // --- السيرفر الأول (VIP) ---
                 if (isVipUnlockedForCurrentMedia || hasShownAdForCurrentMedia) {
-                    // سبق أن شاهد إعلاناً (أياً كان نوعه) لهذا العمل تحديداً
                     proceed()
                 } else {
                     UnityAdsManager.showRewardedAd(context.findActivity()) { success: Boolean, failedToLoad: Boolean ->
@@ -345,13 +345,11 @@ fun DetailsScreen(
                                 proceed()
                             }
                             failedToLoad -> {
-                                // لا يوجد إعلان متاح حالياً => مكافأة مجانية كي لا يُحرم المستخدم من المشاهدة
                                 isVipUnlockedForCurrentMedia = true
                                 hasShownAdForCurrentMedia = true
                                 proceed()
                             }
                             else -> {
-                                // أغلق الإعلان مبكراً قبل اكتماله => لا يفتح السيرفر
                                 Toast.makeText(
                                     context,
                                     "يجب مشاهدة الإعلان بالكامل لفتح السيرفر VIP",
@@ -362,7 +360,6 @@ fun DetailsScreen(
                     }
                 }
             } else {
-                // --- السيرفرات 2 / 3 / 4 ---
                 if (hasShownAdForCurrentMedia || isVipUnlockedForCurrentMedia) {
                     proceed()
                 } else {
@@ -384,8 +381,6 @@ fun DetailsScreen(
             accent?.let { lerpColor(it, Ink, 0.88f) } ?: Ink, tween(700), label = "bottom"
         )
 
-        // ✅ (دعم الأجهزة اللوحية) BoxWithConstraints لمعرفة عرض الشاشة.
-        // على الجوال (isTablet=false) السلوك مطابق 100% للأصل: Box(fillMaxSize) يحوي DetailsBody مباشرة.
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
@@ -393,8 +388,6 @@ fun DetailsScreen(
         ) {
             val isTablet = maxWidth >= TABLET_BREAKPOINT
             val d = ui
-            // ✅ لا يُسمح بفتح شيت المواسم/السيرفرات عبر زر "شاهد الآن" للمسلسلات قبل اكتمال
-            // تحميل بيانات المواسم الحقيقية (تفادي شيت فارغ)؛ الأفلام تعمل فوراً بلا قيد.
             val canPlay = !(mediaType == "tv" && !isFullyLoaded)
             when {
                 d != null -> {
@@ -454,7 +447,7 @@ fun DetailsScreen(
             if (showSeasonSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showSeasonSheet = false },
-                    sheetState = sheetState,
+                    sheetState = seasonSheetState,
                     containerColor = Color(0xFF1E1E1E)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -503,7 +496,7 @@ fun DetailsScreen(
             if (showServerSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showServerSheet = false },
-                    sheetState = sheetState,
+                    sheetState = serverSheetState,
                     containerColor = Color(0xFF1E1E1E)
                 ) {
                     Column(modifier = Modifier.padding(24.dp)) {
@@ -589,10 +582,7 @@ private fun DetailsBody(
     var expanded by remember { mutableStateOf(false) }
     val year = d.date?.take(4)?.takeIf { it.length == 4 }
     val rating = d.rating?.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }
-    // ✅ أثناء العرض الأولي (قبل اكتمال التحميل الحقيقي) نعرض نص "جاري التحميل" بدل
-    // الإيحاء الخاطئ بعدم وجود قصة متاحة إطلاقاً.
     val overview = if (!isFullyLoaded) "جاري تحميل القصة..." else d.overview.ifBlank { "لا توجد قصة متاحة حالياً." }
-    // ✅ تُحجب الشارة أثناء العرض الأولي لتفادي ومضة شارة خاطئة قبل معرفة تاريخ الإصدار الحقيقي
     val badge = remember(d, isFullyLoaded) { if (isFullyLoaded) computeBadge(d.date, d.overview) else null }
 
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
@@ -618,9 +608,6 @@ private fun DetailsBody(
                     Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent))
                 )
             )
-
-            // ✅ (تمت إزالة BadgeLabel من فوق صورة الغلاف نهائياً - تم نقلها بجانب زر "شاهد الآن" أدناه
-            // لتقليل الزحام البصري في منطقة الـ Backdrop)
 
             Column(
                 Modifier
@@ -660,8 +647,6 @@ private fun DetailsBody(
                     year?.let { MetaChip(it, Color.White) }
                 }
 
-                // ✅ (بانر إعادة محاولة مصغّر) يظهر فقط إذا فشل التحديث الكامل بينما البيانات
-                // الأولية (من الشاشة السابقة أو الكاش) ما زالت معروضة، بدل حرمان المستخدم من أي تحكم.
                 if (showInlineError) {
                     Row(
                         Modifier
@@ -681,9 +666,6 @@ private fun DetailsBody(
                     }
                 }
 
-                // ✅ (الشارة الجديدة) تظهر الآن فوق صف "شاهد الآن" مباشرة بدل أعلى صورة الغلاف،
-                // محاذاة لبداية الصف (يمين الشاشة في RTL) كي تبدو مرتبطة بزر التشغيل تحديداً،
-                // وبحجم صغير وأنيق دون أي زحام بصري إضافي.
                 badge?.let {
                     Row(
                         Modifier
@@ -694,7 +676,6 @@ private fun DetailsBody(
                     }
                 }
 
-                // ✅ زر "شاهد الآن" + زر المفضلة بجانبه (صح عند الإضافة / + عند عدم الإضافة)
                 Row(
                     Modifier.padding(top = if (badge != null) 10.dp else 20.dp).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
