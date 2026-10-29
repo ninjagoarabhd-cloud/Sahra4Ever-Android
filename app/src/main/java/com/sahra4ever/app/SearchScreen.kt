@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -113,6 +114,7 @@ fun SearchScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(Ink)) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // ✅ ثابت في الأعلى كما هو تماماً: زر الرجوع + عنوان "البحث"
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -124,78 +126,105 @@ fun SearchScreen(
                 Text("البحث", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
 
-            TextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                placeholder = { Text("بحث", color = Muted) },
-                leadingIcon = { Icon(Icons.Outlined.Search, null, tint = Pink) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        Icon(
-                            Icons.Outlined.Close, "مسح", tint = Muted,
-                            modifier = Modifier.clip(CircleShape).clickable { query = "" }.padding(4.dp)
+            // ✅ (Collapsible Header) شريط البحث + التصنيفات أصبحا الآن داخل LazyVerticalGrid
+            // كأول عنصرين يمتدان على كامل عرض الشبكة (span = maxLineSpan)، فيتمرران
+            // بشكل طبيعي مع النتائج ويختفيان بسلاسة عند التمرير للأسفل، بدون أي
+            // NestedScrollConnection أو AnimatedVisibility إضافية.
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // --- عنصر 1: شريط البحث (span كامل) ---
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    TextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        placeholder = { Text("بحث", color = Muted) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, null, tint = Pink) },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                Icon(
+                                    Icons.Outlined.Close, "مسح", tint = Muted,
+                                    modifier = Modifier.clip(CircleShape).clickable { query = "" }.padding(4.dp)
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFF1E1E1E), unfocusedContainerColor = Color(0xFF1E1E1E),
+                            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                            cursorColor = Pink, focusedTextColor = Color.White, unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(60.dp)
+                    )
+                }
+
+                // --- عنصر 2: التصنيفات (span كامل) ---
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(categories) { cat ->
+                                val isSelected = cat == selectedCategory && query.isBlank()
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(if (isSelected) Pink else Color.Transparent)
+                                        .border(1.dp, if (isSelected) Pink else Color.DarkGray, RoundedCornerShape(20.dp))
+                                        .clickable {
+                                            query = ""
+                                            selectedCategory = cat
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                ) {
+                                    Text(cat, color = if (isSelected) Color.White else Muted, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                }
+
+                // --- حالة: جاري التحميل ---
+                if (isLoading) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(300.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Pink)
+                        }
+                    }
+                }
+                // --- حالة: لا توجد نتائج ---
+                else if (results.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(300.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("لا توجد نتائج مطابقة", color = Muted, fontSize = 16.sp)
+                        }
+                    }
+                }
+                // --- حالة: نتائج موجودة ---
+                else {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            "جميع النتائج (${results.size})",
+                            color = Muted, fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
                         )
                     }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                shape = RoundedCornerShape(12.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF1E1E1E), unfocusedContainerColor = Color(0xFF1E1E1E),
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = Pink, focusedTextColor = Color.White, unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(60.dp)
-            )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(categories) { cat ->
-                    val isSelected = cat == selectedCategory && query.isBlank()
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSelected) Pink else Color.Transparent)
-                            .border(1.dp, if (isSelected) Pink else Color.DarkGray, RoundedCornerShape(20.dp))
-                            .clickable {
-                                query = ""
-                                selectedCategory = cat
-                            }
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        Text(cat, color = if (isSelected) Color.White else Muted, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Pink)
-                }
-            } else if (results.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("لا توجد نتائج مطابقة", color = Muted, fontSize = 16.sp)
-                }
-            } else {
-                Text(
-                    "جميع النتائج (${results.size})",
-                    color = Muted, fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
                     items(results, key = { "${it.id}-${it.mediaType}" }) { movie ->
                         SearchMovieCard(movie) {
                             // ✅ قيم آمنة قبل التمرير لمنع أي segment فارغ في route أو mediaType خاطئ
@@ -214,7 +243,7 @@ fun SearchScreen(
                     }
 
                     if (!isLastPage) {
-                        item {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
                             Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                 if (isLoadingMore) {
                                     CircularProgressIndicator(color = Pink, modifier = Modifier.size(24.dp))
