@@ -88,6 +88,23 @@ private fun hostMatches(host: String, domains: List<String>) =
     domains.any { host == it || host.endsWith(".$it") }
 
 /**
+ * ✅ (تفعيل الترجمة العربية تلقائياً) دالة مساعدة عامة وآمنة لإضافة
+ * query parameter إلى نهاية أي رابط، بغض النظر عمّا إذا كان يحتوي
+ * مسبقاً على باراميترات أخرى أم لا.
+ *
+ * - إذا كان الرابط يحتوي بالفعل على "?" (أي لديه باراميتر واحد على الأقل)،
+ *   تُستخدم "&" لإضافة الباراميتر الجديد دون كسر الرابط.
+ * - إذا لم يكن يحتوي على "?" إطلاقاً، تُستخدم "?" لبدء أول باراميتر.
+ *
+ * هذا يضمن عمل الدالة بأمان تام مهما تغيّر شكل الرابط الأساسي لكل سيرفر
+ * مستقبلاً (سواء كان نظيفاً تماماً أو يحتوي باراميترات مسبقة).
+ */
+private fun appendQueryParam(url: String, param: String): String {
+    val separator = if (url.contains("?")) "&" else "?"
+    return "$url$separator$param"
+}
+
+/**
  * ✅ (إصلاح جذري للكراش)
  * استدعاء activity.requestedOrientation = ... بشكل مباشر يرمي
  * IllegalStateException: "Only fullscreen opaque activities can request orientation"
@@ -269,11 +286,25 @@ fun PlayerScreen(
 
     val profile = SERVERS[initialServerIndex.coerceIn(SERVERS.indices)]
     val isVsEmbed = profile === SERVERS[0]
-    val isVidSrcWiki = profile.name == "Server 4"
+
+    // ✅ (تفعيل الترجمة العربية تلقائياً) تطبيق الباراميتر الصحيح لكل سيرفر
+    // على حدة، باستخدام appendQueryParam الآمنة (تتحقق من وجود "?" مسبقاً
+    // وتستخدم "&" عند الحاجة بدلاً من "?" لتفادي كسر الرابط).
+    //
+    // - Server 1 (vsembed): ds_lang=ar,en → العربية أولوية أولى، الإنجليزية احتياطية.
+    // - Server 2 (embedmaster): بلا تغيير (كما طُلب).
+    // - Server 3 (VidLink Pro): sub_lang=ar.
+    // - Server 4 (vidsrc.wiki): sub=ar (كما كان سابقاً، بلا تغيير في السلوك).
     val url = remember(profile, mediaType, movieId, season, episode) {
         val base = if (mediaType == "tv") "${profile.baseUrl}tv/$movieId/$season/$episode"
         else "${profile.baseUrl}movie/$movieId"
-        if (isVidSrcWiki) "$base?sub=ar" else base
+
+        when (profile.name) {
+            "Server 1" -> appendQueryParam(base, "ds_lang=ar,en")
+            "Server 3" -> appendQueryParam(base, "sub_lang=ar")
+            "Server 4" -> appendQueryParam(base, "sub=ar")
+            else -> base
+        }
     }
 
     var isLoading by remember(url) { mutableStateOf(true) }
