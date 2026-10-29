@@ -131,18 +131,37 @@ private object HomeCache {
 }
 
 /**
- * ✅ (إصلاح دقيق) كاش "يُستهلك مرة واحدة فقط" (Single-Use Cache) لسجل المشاهدة.
+ * ✅ (إصلاح قفزة التمرير في الرئيسية) تحوّل من كاش "يُستهلك مرة واحدة" إلى
+ * كاش يحتفظ دائماً بآخر نسخة معروفة من سجل المشاهدة. السبب الجذري للقفزة:
+ * في النسخة القديمة كانت consumeOnce() تُفرّغ البيانات فور أول استخدام (عند
+ * إقلاع التطبيق). فعند العودة من صفحة التفاصيل إلى الرئيسية (وإعادة بناء
+ * الـ Composition من NavHost) كان history يبدأ كقائمة فارغة للحظة واحدة ثم
+ * يُملأ لاحقاً بعد قراءة غير متزامنة من القرص (Dispatchers.IO). هذا يعني أن
+ * قسم "متابعة المشاهدة" بأكمله (عنوان + صف) كان يختفي ثم يظهر من جديد داخل
+ * LazyColumn، فيُزيح كل العناصر الموجودة أسفله، ويجعل الـ index/offset
+ * المحفوظ مسبقاً يُشير الآن لعنصر مختلف تماماً بصرياً — وهذا بالضبط ما كان
+ * يُسبب "القفزة لموضع مختلف" التي وصفها المستخدم.
+ * الحل: latest() يُعيد دائماً آخر قيمة معروفة فوراً دون أي تفريغ.
  */
 private object HistoryCache {
-    @Volatile private var data: List<WatchHistory>? = null
+    @Volatile private var data: List<WatchHistory> = emptyList()
 
     fun put(list: List<WatchHistory>) { data = list }
 
-    fun consumeOnce(): List<WatchHistory>? {
-        val snapshot = data
-        data = null
-        return snapshot
-    }
+    fun latest(): List<WatchHistory> = data
+}
+
+/**
+ * ✅ (طبقة حماية إضافية لإصلاح قفزة التمرير) حفظ صريح ومضمون 100% لموضع
+ * التمرير في LazyColumn الرئيسية، خارج دورة حياة الـ Composition تماماً
+ * (بنفس نمط HomeCache/HistoryCache أعلاه)، كطبقة أمان إضافية بجانب الحفظ
+ * الداخلي الضمني الموجود أصلاً في rememberLazyListState عبر rememberSaveable.
+ * هذا يضمن عدم فقدان موضع التمرير مهما كانت تفاصيل تنفيذ Navigation Compose
+ * الداخلية (SaveableStateHolder) في أي إصدار مستقبلي من المكتبة.
+ */
+private object HomeScrollCache {
+    @Volatile var index: Int = 0
+    @Volatile var offset: Int = 0
 }
 
 private val searchCache = LruCache<String, List<Movie>>(30)
@@ -352,7 +371,23 @@ private fun HomeContent(
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
-    val listState = rememberLazyListState()
+
+    // ✅ (إصلاح قفزة التمرير) يبدأ فوراً من آخر موضع تمرير معروف ومحفوظ خارج
+    // دورة حياة الـ Composition تماماً، بدل البدء من الصفر دوماً.
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = HomeScrollCache.index,
+        initialFirstVisibleItemScrollOffset = HomeScrollCache.offset
+    )
+
+    // ✅ يراقب التمرير باستمرار ويحفظه فوراً في الكاش الخارجي، فلا يُفقد أبداً
+    // بغض النظر عن توقيت تدمير/إعادة بناء الشاشة بواسطة NavHost.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collectLatest { (index, offset) ->
+                HomeScrollCache.index = index
+                HomeScrollCache.offset = offset
+            }
+    }
 
     val cached = remember { HomeCache.latest() }
     var home by remember { mutableStateOf(cached ?: HomeData()) }
@@ -360,7 +395,10 @@ private fun HomeContent(
     var error by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    var history by remember { mutableStateOf<List<WatchHistory>>(emptyList()) }
+    // ✅ (إصلاح قفزة التمرير) يبدأ فوراً بآخر قيمة معروفة من HistoryCache بدل
+    // قائمة فارغة دائماً، فلا يختفي قسم "متابعة المشاهدة" مؤقتاً أبداً عند
+    // العودة من صفحة التفاصيل، وبالتالي لا تنزاح عناصر LazyColumn.
+    var history by remember { mutableStateOf(HistoryCache.latest()) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
@@ -371,10 +409,11 @@ private fun HomeContent(
     }
 
     LaunchedEffect(Unit) {
-        history = HistoryCache.consumeOnce()
-            ?: withContext(Dispatchers.IO) {
-                HistoryManager.getHistory(context).distinctBy { "${it.type}-${it.id}" }
-            }
+        val fresh = withContext(Dispatchers.IO) {
+            HistoryManager.getHistory(context).distinctBy { "${it.type}-${it.id}" }
+        }
+        history = fresh
+        HistoryCache.put(fresh)
     }
 
     LaunchedEffect(reloadKey) {

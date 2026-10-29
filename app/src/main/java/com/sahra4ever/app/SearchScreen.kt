@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,6 +21,8 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -48,6 +53,28 @@ private fun img(path: String?, size: String = "w342"): String? = path?.let { "ht
 private fun defaultMediaTypeFor(category: String): String =
     if (category == "مسلسلات") "tv" else "movie"
 
+/**
+ * ✅ (إصلاح فقدان حالة البحث عند العودة من التفاصيل)
+ * Saver مخصص لحفظ/استعادة قائمة Movie كاملة عبر rememberSaveable، بتحويلها
+ * إلى JSON (بنفس آلية Gson المستخدمة أصلاً في HistoryManager.kt) وإعادة
+ * بنائها عند استعادة الحالة. بهذا تنجو نتائج البحث فعلياً من تدمير/إعادة بناء
+ * الـ Composition الذي يقوم به NavHost عند الذهاب لصفحة التفاصيل والعودة منها،
+ * بدل الاعتماد على remember العادي الذي يُفرَّغ بالكامل عند ذلك.
+ */
+private val MovieListSaver: Saver<List<Movie>, String> = Saver(
+    save = { list ->
+        try { Gson().toJson(list) } catch (e: Exception) { "[]" }
+    },
+    restore = { json ->
+        try {
+            val type = object : TypeToken<List<Movie>>() {}.type
+            Gson().fromJson<List<Movie>>(json, type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
@@ -61,14 +88,28 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
 
-    var query by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf(initialCategory) }
-    var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
+    // ✅ (إصلاح فقدان الحالة) كل الحالات الأساسية أصبحت rememberSaveable بدل
+    // remember العادي، فتنجو تماماً من تدمير/إعادة بناء الـ Composition التي
+    // يقوم بها NavHost عند الذهاب لصفحة التفاصيل ثم العودة منها.
+    var query by rememberSaveable { mutableStateOf("") }
+    var selectedCategory by rememberSaveable { mutableStateOf(initialCategory) }
+    var results by rememberSaveable(stateSaver = MovieListSaver) { mutableStateOf<List<Movie>>(emptyList()) }
+    var isLoading by rememberSaveable { mutableStateOf(false) }
 
-    var page by remember { mutableIntStateOf(1) }
-    var isLastPage by remember { mutableStateOf(false) }
-    var isLoadingMore by remember { mutableStateOf(false) }
+    var page by rememberSaveable { mutableIntStateOf(1) }
+    var isLastPage by rememberSaveable { mutableStateOf(false) }
+    var isLoadingMore by rememberSaveable { mutableStateOf(false) }
+
+    // ✅ "بصمة" آخر طلب تم تنفيذه فعلياً بنجاح (تصنيف + نص بحث). تُستخدم لمنع
+    // LaunchedEffect من إعادة الجلب من الصفر إذا كانت الحالة الحالية مطابقة
+    // تماماً لآخر حالة تم جلبها ولا تزال نتائجها محفوظة — أي أننا فقط عدنا من
+    // صفحة التفاصيل ولم يغيّر المستخدم شيئاً فعلياً.
+    var fetchedKey by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // ✅ موضع تمرير الشبكة صريح الآن (بدل الاعتماد على الافتراضي الضمني داخل
+    // LazyVerticalGrid)، فيبقى محفوظاً بشكل مضمون عبر rememberSaveable الداخلي
+    // الخاص به بنفس الطريقة بالضبط.
+    val gridState = rememberLazyGridState()
 
     val categories = listOf("الكل", "أفلام", "مسلسلات", "أكشن", "دراما", "خيال علمي", "كوميدي", "رعب")
 
@@ -105,11 +146,20 @@ fun SearchScreen(
         }
     }
 
+    // ✅ الإصلاح الجذري: لا نُعيد الجلب إذا كانت الحالة الحالية (تصنيف + نص بحث)
+    // مطابقة تماماً لآخر طلب تم تنفيذه بنجاح ولا تزال نتائجه محفوظة فعلياً
+    // (أي أننا فقط عدنا من صفحة التفاصيل). أي تغيير حقيقي من المستخدم في
+    // query أو selectedCategory يُنتج currentKey مختلفاً فيُعاد الجلب كالمعتاد.
     LaunchedEffect(query, selectedCategory) {
+        val currentKey = "$selectedCategory|$query"
+        if (fetchedKey == currentKey && results.isNotEmpty()) {
+            return@LaunchedEffect
+        }
         if (query.isNotBlank()) {
             delay(400)
         }
         fetchData(false)
+        fetchedKey = currentKey
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Ink)) {
@@ -126,11 +176,10 @@ fun SearchScreen(
                 Text("البحث", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
 
-            // ✅ (Collapsible Header) شريط البحث + التصنيفات أصبحا الآن داخل LazyVerticalGrid
-            // كأول عنصرين يمتدان على كامل عرض الشبكة (span = maxLineSpan)، فيتمرران
-            // بشكل طبيعي مع النتائج ويختفيان بسلاسة عند التمرير للأسفل، بدون أي
-            // NestedScrollConnection أو AnimatedVisibility إضافية.
+            // ✅ (Collapsible Header) شريط البحث + التصنيفات داخل LazyVerticalGrid
+            // كأول عنصرين يمتدان على كامل عرض الشبكة (span = maxLineSpan).
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(2),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
